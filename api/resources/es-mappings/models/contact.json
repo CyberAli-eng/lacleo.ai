@@ -1,0 +1,376 @@
+{
+    "website": {
+        "type": "keyword",
+        "normalizer": "lowercase",
+        "null_value": null,
+        "fields": {
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "company": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "stem": {
+                "type": "text",
+                "analyzer": "iq_text_stem"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "company_obj": {
+        "properties": {
+            "id": { "type": "keyword" },
+            "domain": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "fields": { "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true } }
+            },
+            "name": {
+                "type": "text",
+                "analyzer": "iq_text_base",
+                "fields": {
+                    "keyword": { "type": "keyword" },
+                    "prefix": { "type": "text", "analyzer": "i_prefix", "search_analyzer": "q_prefix" },
+                    "joined": { "type": "text", "analyzer": "i_text_bigram", "search_analyzer": "q_text_bigram" },
+                    "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true }
+                }
+            },
+            "website": { "type": "keyword", "normalizer": "lowercase" },
+            "employee_count": { "type": "integer" },
+            "annual_revenue_usd": { "type": "long" },
+            "industry": { "type": "keyword", "normalizer": "lowercase" },
+            "location": {
+                "properties": {
+                    "city": { "type": "keyword", "fields": { "lowercase": { "type": "keyword", "normalizer": "lowercase" }, "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true } } },
+                    "state": { "type": "keyword", "fields": { "lowercase": { "type": "keyword", "normalizer": "lowercase" }, "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true } } },
+                    "country": { "type": "keyword", "fields": { "lowercase": { "type": "keyword", "normalizer": "lowercase" }, "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true } } }
+                }
+            },
+            "technologies": { "type": "keyword" }
+        }
+    },
+    "first_name": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "last_name": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "full_name": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "title": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "job_title": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "keyword": { "type": "keyword" },
+            "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true }
+        }
+    },
+    "normalized_title": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "keyword": { "type": "keyword" },
+            "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true }
+        }
+    },
+    "title_keywords": {
+        "type": "text",
+        "analyzer": "iq_text_stem",
+        "fields": {
+            "keyword": { "type": "keyword" }
+        }
+    },
+    "title_synonyms": {
+        "type": "text",
+        "analyzer": "title_synonym_analyzer"
+    },
+    "emails": {
+        "type": "nested",
+        "properties": {
+            "type": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
+            "email": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
+            "email_status": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            }
+        }
+    },
+    "seniority_level": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "keyword": { "type": "keyword", "normalizer": "lowercase" },
+            "sort": { "type": "keyword", "normalizer": "lowercase", "doc_values": true }
+        }
+    },
+    "department": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "keyword": { "type": "keyword", "normalizer": "lowercase" }
+        }
+    },
+    "linkedin_url": {
+        "type": "keyword",
+        "fields": {
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "seniority": {
+        "type": "keyword"
+    },
+    "departments": {
+        "type": "keyword"
+    },
+    "location": {
+        "properties": {
+            "street": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    },
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "city": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "state": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "country": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "postal_code": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            }
+        }
+    },
+    "phone_numbers": {
+        "type": "nested",
+        "properties": {
+            "type": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
+            "phone_number": {
+                "type": "keyword"
+            },
+            "is_valid": {
+                "type": "boolean"
+            }
+        }
+    },
+    "social_media": {
+        "properties": {
+            "instagram_url": {
+                "type": "keyword"
+            },
+            "facebook_url": {
+                "type": "keyword"
+            },
+            "twitter_url": {
+                "type": "keyword"
+            },
+            "github_url": {
+                "type": "keyword"
+            },
+            "youtube_url": {
+                "type": "keyword"
+            }
+        }
+    }
+}

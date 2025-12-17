@@ -1,0 +1,234 @@
+{
+    "website": {
+        "type": "keyword",
+        "fields": {
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "company": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            },
+            "stem": {
+                "type": "text",
+                "analyzer": "iq_text_stem"
+            },
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "company_also_known_as": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "delimiter": {
+                "type": "text",
+                "analyzer": "iq_text_delimiter"
+            },
+            "joined": {
+                "type": "text",
+                "analyzer": "i_text_bigram",
+                "search_analyzer": "q_text_bigram"
+            },
+            "prefix": {
+                "type": "text",
+                "analyzer": "i_prefix",
+                "search_analyzer": "q_prefix"
+            },
+            "keyword": {
+                "type": "keyword"
+            }
+        }
+    },
+    "company_linkedin_url": {
+        "type": "keyword",
+        "fields": {
+            "sort": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "doc_values": true
+            }
+        }
+    },
+    "company_phone": {
+        "type": "keyword"
+    },
+    "employee_count": {
+        "type": "integer"
+    },
+    "industry": {
+        "type": "keyword"
+    },
+    "keywords": {
+        "type": "keyword"
+    },
+    "business_category": {
+        "type": "keyword"
+    },
+    "service_or_product": {
+        "type": "text",
+        "analyzer": "iq_text_base",
+        "fields": {
+            "keyword": {
+                "type": "keyword"
+            }
+        }
+    },
+    "social_media": {
+        "properties": {
+            "instagram_url": {
+                "type": "keyword"
+            },
+            "facebook_url": {
+                "type": "keyword"
+            },
+            "twitter_url": {
+                "type": "keyword"
+            }
+        }
+    },
+    "company_address": {
+        "type": "text",
+        "fields": {
+            "keyword": {
+                "type": "keyword"
+            }
+        }
+    },
+    "location": {
+        "properties": {
+            "street": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    },
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "city": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    }
+                }
+            },
+            "state": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "country": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            },
+            "postal_code": {
+                "type": "keyword",
+                "fields": {
+                    "lowercase": {
+                        "type": "keyword",
+                        "normalizer": "lowercase"
+                    },
+                    "sort": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "doc_values": true
+                    }
+                }
+            }
+        }
+    },
+    "seo_description": {
+        "type": "text"
+    },
+    "technologies": {
+        "type": "keyword"
+    },
+    "funding": {
+        "properties": {
+            "total_funding": {
+                "type": "float"
+            },
+            "latest_funding": {
+                "type": "text"
+            },
+            "latest_funding_amount": {
+                "type": "float"
+            },
+            "last_raised_at": {
+                "type": "date"
+            }
+        }
+    },
+    "annual_revenue": {
+        "type": "float"
+    },
+    "retail_locations": {
+        "type": "integer"
+    },
+    "naics_codes": {
+        "type": "keyword"
+    },
+    "sic_codes": {
+        "type": "keyword"
+    },
+    "business_description": {
+        "type": "text"
+    },
+    "founded_year": {
+        "type": "integer"
+    }
+}

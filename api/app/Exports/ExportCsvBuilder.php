@@ -1,0 +1,616 @@
+<?php
+
+namespace App\Exports;
+
+use App\Services\RecordNormalizer;
+
+class ExportCsvBuilder
+{
+    public const FULL_HEADER = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'work_email',
+        'personal_email',
+        'seniority',
+        'departments',
+        'mobile_number',
+        'direct_number',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'website',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'company_city',
+        'company_state',
+        'company_country',
+        'postal_code',
+        'company_address',
+        'keywords',
+        'company_phone_number',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+
+    public const EMAIL_ONLY_HEADER = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'work_email',
+        'personal_email',
+        'seniority',
+        'departments',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'website',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'company_city',
+        'company_state',
+        'company_country',
+        'postal_code',
+        'company_address',
+        'keywords',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+
+    public const PHONE_ONLY_HEADER = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'seniority',
+        'departments',
+        'mobile_number',
+        'direct_number',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'website',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'company_city',
+        'company_state',
+        'company_country',
+        'postal_code',
+        'company_address',
+        'company_phone_number',
+        'keywords',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+
+    public const FREE_EXPORT_HEADER = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'seniority',
+        'departments',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'website',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'company_city',
+        'company_state',
+        'company_country',
+        'postal_code',
+        'company_address',
+        'keywords',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+    public const CONTACT_HEADERS_PII = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'work_email',
+        'personal_email',
+        'seniority',
+        'departments',
+        'mobile_number',
+        'direct_number',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+    ];
+
+    public const CONTACT_HEADERS_FREE = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'seniority',
+        'departments',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+    ];
+
+    public const COMPANY_HEADERS_PII = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'work_email',
+        'personal_email',
+        'seniority',
+        'departments',
+        'mobile_number',
+        'direct_number',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'city',
+        'state',
+        'country',
+        'postal_code',
+        'address',
+        'keywords',
+        'phone_number',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+
+    public const COMPANY_HEADERS_FREE = [
+        'domain',
+        'first_name',
+        'last_name',
+        'title',
+        'seniority',
+        'departments',
+        'person_linkedin_url',
+        'city',
+        'state',
+        'country',
+        'company_name',
+        'number_of_employees',
+        'industry',
+        'linkedin_url',
+        'facebook_url',
+        'twitter_url',
+        'street',
+        'city',
+        'state',
+        'country',
+        'postal_code',
+        'address',
+        'keywords',
+        'technologies',
+        'total_funding_usd',
+        'latest_funding',
+        'latest_funding_amount',
+        'last_raised_at',
+        'annual_revenue_usd',
+        'sic_code',
+        'short_description',
+        'founded_year',
+    ];
+
+    public static function buildContactsCsv(array $contacts, bool $sanitize = false): string
+    {
+        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+        // Column set is driven purely by export mode:
+        // - $sanitize = false → paid export (includes emails/phones)
+        // - $sanitize = true  → free export (no emails/phones)
+        $headers = $sanitize ? self::CONTACT_HEADERS_FREE : self::CONTACT_HEADERS_PII;
+        $out = fopen('php://temp', 'r+');
+        fputcsv($out, $headers);
+
+        foreach ($contactsNorm as $c) {
+            $row = $sanitize ? self::composeContactRowFree($c) : self::composeContactRowPii($c, $sanitize);
+            // Skip rows that are completely empty to avoid blank CSV lines
+            if (implode('', $row) === '') {
+                continue;
+            }
+            fputcsv($out, $row);
+        }
+
+        rewind($out);
+
+        return stream_get_contents($out);
+    }
+
+    public static function buildContactsCsvDynamic(array $contacts, bool $emailSelected, bool $phoneSelected): string
+    {
+        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+        $headers = match (true) {
+            $emailSelected && $phoneSelected => self::FULL_HEADER,
+            $emailSelected && ! $phoneSelected => self::EMAIL_ONLY_HEADER,
+            ! $emailSelected && $phoneSelected => self::PHONE_ONLY_HEADER,
+            default => self::FREE_EXPORT_HEADER,
+        };
+        $out = fopen('php://temp', 'r+');
+        fputcsv($out, $headers);
+
+        foreach ($contactsNorm as $c) {
+            $row = self::composeContactRowDynamic($c, $emailSelected, $phoneSelected);
+            if (implode('', $row) === '') {
+                continue;
+            }
+            fputcsv($out, $row);
+        }
+
+        rewind($out);
+
+        return stream_get_contents($out);
+    }
+
+    public static function buildCompaniesCsvDynamic(array $companies, array $contacts, bool $emailSelected, bool $phoneSelected): string
+    {
+        $companiesNorm = array_map(fn ($c) => RecordNormalizer::normalizeCompany(is_array($c) ? $c : ($c ? $c->toArray() : [])), $companies);
+        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+
+        $headers = match (true) {
+            $emailSelected && $phoneSelected => self::FULL_HEADER,
+            $emailSelected && !$phoneSelected => self::EMAIL_ONLY_HEADER,
+            !$emailSelected && $phoneSelected => self::PHONE_ONLY_HEADER,
+            default => self::FREE_EXPORT_HEADER,
+        };
+        $out = fopen('php://temp', 'r+');
+        fputcsv($out, $headers);
+
+        // Map companies by canonical domain
+        $domainMap = [];
+        foreach ($companiesNorm as $comp) {
+            $canonical = strtolower(trim((string) ($comp['website'] ?? $comp['domain'] ?? '')));
+            $all = array_values(array_filter(array_unique(array_map('strtolower', array_filter([
+                $comp['website'] ?? null,
+                $comp['domain'] ?? null,
+            ])))));
+            $domainMap[$canonical] = $domainMap[$canonical] ?? $comp;
+            foreach ($all as $d) {
+                $domainMap[$d] = $domainMap[$d] ?? $comp;
+            }
+        }
+
+        $byDomain = [];
+        foreach ($contactsNorm as $c) {
+            $cd = strtolower(trim((string) ($c['website'] ?? '')));
+            if ($cd !== '' && isset($domainMap[$cd])) {
+                $key = strtolower(trim((string) ($domainMap[$cd]['website'] ?? $domainMap[$cd]['domain'] ?? '')));
+                $byDomain[$key] = $byDomain[$key] ?? [];
+                $byDomain[$key][] = $c;
+            }
+        }
+
+        foreach ($companiesNorm as $comp) {
+            $canonical = strtolower(trim((string) ($comp['website'] ?? $comp['domain'] ?? '')));
+            $rows = $byDomain[$canonical] ?? [];
+            if (empty($rows)) {
+                $row = self::composeCompanyRowDynamic($comp, null, $emailSelected, $phoneSelected);
+                if (implode('', $row) === '') {
+                    continue;
+                }
+                fputcsv($out, $row);
+            } else {
+                foreach ($rows as $c) {
+                    $row = self::composeCompanyRowDynamic($comp, $c, $emailSelected, $phoneSelected);
+                    if (implode('', $row) === '') {
+                        continue;
+                    }
+                    fputcsv($out, $row);
+                }
+            }
+        }
+
+        rewind($out);
+
+        return stream_get_contents($out);
+    }
+
+    // PII detection is now handled by the caller via $sanitize; the helpers
+    // contactsHavePii/companiesHavePii are intentionally no-ops and can be
+    // removed in a future cleanup without changing behaviour.
+
+    private static function composeContactRowPii(array $c, bool $sanitize): array
+    {
+        $primaryEmail = $sanitize ? '' : (string) (RecordNormalizer::getPrimaryEmail($c) ?? '');
+        $workEmail = $sanitize ? '' : (string) ($c['work_email'] ?? '');
+        if ($workEmail === '' && $primaryEmail !== '') {
+            $workEmail = $primaryEmail;
+        }
+        $personalEmail = $sanitize ? '' : (string) ($c['personal_email'] ?? '');
+        if ($personalEmail === '' && ! $sanitize) {
+            $secondary = '';
+            foreach (($c['emails'] ?? []) as $e) {
+                $val = (string) ($e['email'] ?? '');
+                if ($val !== '' && $val !== $workEmail) {
+                    $secondary = $val;
+                    break;
+                }
+            }
+            $personalEmail = $secondary;
+        }
+
+        return [
+            (string) ($c['domain'] ?? ''),
+            (string) ($c['first_name'] ?? ''),
+            (string) ($c['last_name'] ?? ''),
+            (string) ($c['title'] ?? ''),
+            $workEmail,
+            $personalEmail,
+            (string) ($c['seniority'] ?? ''),
+            is_array($c['departments'] ?? null) ? implode(', ', $c['departments']) : (string) ($c['departments'] ?? ''),
+            $sanitize ? '' : (string) ($c['mobile_number'] ?? ''),
+            $sanitize ? '' : (string) ($c['direct_number'] ?? ''),
+            (string) ($c['person_linkedin_url'] ?? ''),
+            (string) ($c['city'] ?? ''),
+            (string) ($c['state'] ?? ''),
+            (string) ($c['country'] ?? ''),
+        ];
+    }
+
+    private static function composeContactRowFree(array $c): array
+    {
+        return [
+            (string) ($c['domain'] ?? ''),
+            (string) ($c['first_name'] ?? ''),
+            (string) ($c['last_name'] ?? ''),
+            (string) ($c['title'] ?? ''),
+            (string) ($c['seniority'] ?? ''),
+            is_array($c['departments'] ?? null) ? implode(', ', $c['departments']) : (string) ($c['departments'] ?? ''),
+            (string) ($c['person_linkedin_url'] ?? ''),
+            (string) ($c['city'] ?? ''),
+            (string) ($c['state'] ?? ''),
+            (string) ($c['country'] ?? ''),
+        ];
+    }
+
+    private static function composeContactRowDynamic(array $c, bool $emailSelected, bool $phoneSelected): array
+    {
+        $primaryEmail = $emailSelected ? (string) (RecordNormalizer::getPrimaryEmail($c) ?? '') : '';
+        $workEmail = $emailSelected ? (string) ($c['work_email'] ?? '') : '';
+        if ($workEmail === '' && $primaryEmail !== '') {
+            $workEmail = $primaryEmail;
+        }
+        $personalEmail = $emailSelected ? (string) ($c['personal_email'] ?? '') : '';
+        if ($emailSelected && $personalEmail === '') {
+            $secondary = '';
+            foreach ((($c['emails'] ?? []) ?: []) as $e) {
+                $val = (string) ($e['email'] ?? '');
+                if ($val !== '' && $val !== $workEmail) {
+                    $secondary = $val;
+                    break;
+                }
+            }
+            $personalEmail = $secondary;
+        }
+
+        return [
+            (string) ($c['domain'] ?? ''),
+            (string) ($c['first_name'] ?? ''),
+            (string) ($c['last_name'] ?? ''),
+            (string) ($c['title'] ?? ''),
+            $workEmail,
+            $personalEmail,
+            (string) ($c['seniority'] ?? ''),
+            is_array($c['departments'] ?? null) ? implode(', ', $c['departments']) : (string) ($c['departments'] ?? ''),
+            $phoneSelected ? (string) ($c['mobile_number'] ?? '') : '',
+            $phoneSelected ? (string) ($c['direct_number'] ?? '') : '',
+            (string) ($c['person_linkedin_url'] ?? ''),
+            (string) ($c['city'] ?? ''),
+            (string) ($c['state'] ?? ''),
+            (string) ($c['country'] ?? ''),
+            (string) ($c['website'] ?? $c['domain'] ?? ''),
+            (string) ($c['company'] ?? ''),
+            (string) ($c['number_of_employees'] ?? ''),
+            (string) ($c['industry'] ?? ''),
+            (string) ($c['linkedin_url'] ?? ''),
+            (string) ($c['facebook_url'] ?? ''),
+            (string) ($c['twitter_url'] ?? ''),
+            (string) ($c['street'] ?? ''),
+            (string) ($c['city'] ?? ''),
+            (string) ($c['state'] ?? ''),
+            (string) ($c['country'] ?? ''),
+            (string) ($c['postal_code'] ?? ''),
+            (string) ($c['address'] ?? ''),
+            is_array($c['keywords'] ?? null) ? implode('; ', $c['keywords']) : (string) ($c['keywords'] ?? ''),
+            $phoneSelected ? (string) ($c['company_phone'] ?? $c['phone_number'] ?? '') : '',
+            is_array($c['technologies'] ?? null) ? implode('; ', $c['technologies']) : (string) ($c['technologies'] ?? ''),
+            (string) ($c['total_funding_usd'] ?? ''),
+            (string) ($c['latest_funding'] ?? ''),
+            (string) ($c['latest_funding_amount'] ?? ''),
+            (string) ($c['last_raised_at'] ?? ''),
+            (string) ($c['annual_revenue_usd'] ?? ''),
+            (string) ($c['sic_code'] ?? ''),
+            (string) ($c['short_description'] ?? ''),
+            (string) ($c['founded_year'] ?? ''),
+        ];
+    }
+
+    private static function composeCompanyRowDynamic(array $comp, ?array $c, bool $emailSelected, bool $phoneSelected): array
+    {
+        $contactCity = (string) ($c['city'] ?? '');
+        $contactState = (string) ($c['state'] ?? '');
+        $contactCountry = (string) ($c['country'] ?? '');
+        $companyCity = (string) ($comp['city'] ?? '');
+        $companyState = (string) ($comp['state'] ?? '');
+        $companyCountry = (string) ($comp['country'] ?? '');
+        $keywords = is_array($comp['keywords'] ?? null) ? implode('; ', $comp['keywords']) : (string) ($comp['keywords'] ?? '');
+        $techs = is_array($comp['technologies'] ?? null) ? implode('; ', $comp['technologies']) : (string) ($comp['technologies'] ?? '');
+
+        $primaryEmail = $emailSelected ? (string) (RecordNormalizer::getPrimaryEmail($c ?? []) ?? '') : '';
+        $workEmail = $emailSelected ? (string) (($c['work_email'] ?? '') ?: '') : '';
+        if ($workEmail === '' && $primaryEmail !== '') {
+            $workEmail = $primaryEmail;
+        }
+        $personalEmail = $emailSelected ? (string) (($c['personal_email'] ?? '') ?: '') : '';
+        if ($emailSelected && $personalEmail === '') {
+            $secondary = '';
+            foreach ((($c['emails'] ?? []) ?: []) as $e) {
+                $val = (string) ($e['email'] ?? '');
+                if ($val !== '' && $val !== $workEmail) {
+                    $secondary = $val;
+                    break;
+                }
+            }
+            $personalEmail = $secondary;
+        }
+
+        return [
+            (string) ($c['domain'] ?? $comp['domain'] ?? ''),
+            (string) ($c['first_name'] ?? ''),
+            (string) ($c['last_name'] ?? ''),
+            (string) ($c['title'] ?? ''),
+            $workEmail,
+            $personalEmail,
+            (string) ($c['seniority'] ?? ''),
+            is_array($c['departments'] ?? null) ? implode(', ', $c['departments']) : (string) ($c['departments'] ?? ''),
+            $phoneSelected ? (string) ($c['mobile_number'] ?? '') : '',
+            $phoneSelected ? (string) ($c['direct_number'] ?? '') : '',
+            (string) ($c['person_linkedin_url'] ?? ''),
+            $contactCity,
+            $contactState,
+            $contactCountry,
+            (string) ($comp['website'] ?? $comp['domain'] ?? ''),
+            (string) ($comp['name'] ?? $comp['company'] ?? ''),
+            (string) ($comp['number_of_employees'] ?? ''),
+            (string) ($comp['industry'] ?? ''),
+            (string) ($comp['linkedin_url'] ?? ''),
+            (string) ($comp['facebook_url'] ?? ''),
+            (string) ($comp['twitter_url'] ?? ''),
+            (string) ($comp['street'] ?? ''),
+            $companyCity,
+            $companyState,
+            $companyCountry,
+            (string) ($comp['postal_code'] ?? ''),
+            (string) ($comp['address'] ?? ''),
+            $keywords,
+            $phoneSelected ? (string) ($comp['phone_number'] ?? '') : '',
+            $techs,
+            (string) ($comp['total_funding_usd'] ?? ''),
+            '',
+            '',
+            '',
+            (string) ($comp['annual_revenue_usd'] ?? ''),
+            (string) ($comp['sic_code'] ?? ''),
+            (string) ($comp['short_description'] ?? ''),
+            (string) ($comp['founded_year'] ?? ''),
+        ];
+    }
+
+    private static function composeCompanyRowFree(array $comp, ?array $c): array
+    {
+        $contactCity = (string) ($c['city'] ?? '');
+        $contactState = (string) ($c['state'] ?? '');
+        $contactCountry = (string) ($c['country'] ?? '');
+        $companyCity = (string) ($comp['city'] ?? '');
+        $companyState = (string) ($comp['state'] ?? '');
+        $companyCountry = (string) ($comp['country'] ?? '');
+        $keywords = is_array($comp['keywords'] ?? null) ? implode('; ', $comp['keywords']) : (string) ($comp['keywords'] ?? '');
+        $techs = is_array($comp['technologies'] ?? null) ? implode('; ', $comp['technologies']) : (string) ($comp['technologies'] ?? '');
+
+        return [
+            (string) ($c['domain'] ?? $comp['domain'] ?? ''),
+            (string) ($c['first_name'] ?? ''),
+            (string) ($c['last_name'] ?? ''),
+            (string) ($c['title'] ?? ''),
+            (string) ($c['seniority'] ?? ''),
+            is_array($c['departments'] ?? null) ? implode(', ', $c['departments']) : (string) ($c['departments'] ?? ''),
+            (string) ($c['person_linkedin_url'] ?? ''),
+            $contactCity,
+            $contactState,
+            $contactCountry,
+            (string) ($comp['name'] ?? $comp['company'] ?? ''),
+            (string) ($comp['number_of_employees'] ?? ''),
+            (string) ($comp['industry'] ?? ''),
+            (string) ($comp['linkedin_url'] ?? ''),
+            (string) ($comp['facebook_url'] ?? ''),
+            (string) ($comp['twitter_url'] ?? ''),
+            (string) ($comp['street'] ?? ''),
+            $companyCity,
+            $companyState,
+            $companyCountry,
+            (string) ($comp['postal_code'] ?? ''),
+            (string) ($comp['address'] ?? ''),
+            $keywords,
+            $techs,
+            (string) ($comp['total_funding_usd'] ?? ''),
+            '', // latest_funding
+            '', // latest_funding_amount
+            '', // last_raised_at
+            (string) ($comp['annual_revenue_usd'] ?? ''),
+            (string) ($comp['sic_code'] ?? ''),
+            (string) ($comp['short_description'] ?? ''),
+            (string) ($comp['founded_year'] ?? ''),
+        ];
+    }
+}
