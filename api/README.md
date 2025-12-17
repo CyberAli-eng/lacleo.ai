@@ -1,1 +1,1 @@
-## This repo powers the main backend of LaCelo
+## This repo powers the main backend of LaCleoAI

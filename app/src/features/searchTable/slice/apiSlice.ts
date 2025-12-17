@@ -1,7 +1,7 @@
 import { apiSlice } from "@/app/redux/apiSlice"
-import { CompanyAttributes, ContactAttributes, SearchApiResponse, SearchRequestParams } from "@/interface/searchTable/search"
+import { CompanyAttributes, ContactAttributes, SavedFilter, SearchApiResponse, SearchRequestParams } from "@/interface/searchTable/search"
 
-const enhancedApi = apiSlice.enhanceEndpoints({ addTagTypes: ["BillingUsage", "User"] })
+const enhancedApi = apiSlice.enhanceEndpoints({ addTagTypes: ["BillingUsage", "User", "SavedFilter"] })
 
 const contactsApi = enhancedApi.injectEndpoints({
   endpoints: (builder) => {
@@ -153,6 +153,49 @@ const contactsApi = enhancedApi.injectEndpoints({
       }),
       billingSubscribe: builder.mutation<{ checkout_url: string }, { plan_id: string }>({
         query: ({ plan_id }) => ({ url: "/billing/subscribe", method: "POST", body: { plan_id } })
+      }),
+      // Saved Filters
+      getSavedFilters: builder.query<{ data: SavedFilter[] }, { type?: "contact" | "company" }>({
+        query: ({ type }) => ({
+          url: "/saved-filters",
+          params: type ? { type } : undefined
+        }),
+        providesTags: ["SavedFilter"]
+      }),
+      createSavedFilter: builder.mutation<
+        { data: SavedFilter },
+        {
+          name: string
+          description?: string
+          filters: unknown
+          entity_type: "contact" | "company"
+          tags?: string[]
+        }
+      >({
+        query: (body) => ({
+          url: "/saved-filters",
+          method: "POST",
+          body
+        }),
+        invalidatesTags: ["SavedFilter"]
+      }),
+      deleteSavedFilter: builder.mutation<{ message: string }, string>({
+        query: (id) => ({
+          url: `/saved-filters/${id}`,
+          method: "DELETE"
+        }),
+        invalidatesTags: ["SavedFilter"]
+      }),
+      updateSavedFilter: builder.mutation<
+        { data: SavedFilter },
+        { id: string; name?: string; description?: string; is_starred?: boolean; filters?: unknown; tags?: string[] }
+      >({
+        query: ({ id, ...body }) => ({
+          url: `/saved-filters/${id}`,
+          method: "PUT",
+          body
+        }),
+        invalidatesTags: ["SavedFilter"]
       })
     }
   }
@@ -170,5 +213,9 @@ export const {
   useExportCreateMutation,
   useBillingPurchaseMutation,
   useBillingPortalMutation,
-  useBillingSubscribeMutation
+  useBillingSubscribeMutation,
+  useGetSavedFiltersQuery,
+  useCreateSavedFilterMutation,
+  useDeleteSavedFilterMutation,
+  useUpdateSavedFilterMutation
 } = contactsApi

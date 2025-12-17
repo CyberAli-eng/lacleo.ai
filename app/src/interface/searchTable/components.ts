@@ -34,4 +34,5 @@ export interface DataTableProps<T> {
   pagination?: PaginationState
   onPageChange: (page: number) => void
   onOpenEditColumns?: () => void
+  entityType?: "contact" | "company"
 }

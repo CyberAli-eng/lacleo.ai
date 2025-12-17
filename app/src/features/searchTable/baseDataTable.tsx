@@ -5,7 +5,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingSpinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DataTableColumn, DataTableProps } from "@/interface/searchTable/components"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronDown, ChevronLeft, Save, Search, SortDesc, Sparkle } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronDown, ChevronLeft, ChevronRight, Save, Search, SortDesc, Plus } from "lucide-react"
+import { useState } from "react"
+import SaveFilter from "@/components/ui/modals/savefilter"
 import React from "react"
 import { useSelector, useDispatch } from "react-redux"
 import { selectIsAiPanelCollapsed, expandAiPanel } from "@/features/aisearch/slice/searchslice"
@@ -41,11 +43,13 @@ export function DataTable<T>({
   onItemSelect,
   onSelectAll,
   onRowClick,
-  onOpenEditColumns
+  onOpenEditColumns,
+  entityType = "contact"
 }: ExtendedDataTableProps<T>) {
   const dispatch = useDispatch()
   const isAiPanelCollapsed = useSelector(selectIsAiPanelCollapsed)
   const currentView = useSelector(selectSearchTableView)
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const renderCell = (column: DataTableColumn<T>, row: T): React.ReactNode => {
     const value = row[column.field]
     if (column.render) {
@@ -151,9 +155,8 @@ export function DataTable<T>({
           <button
             type="button"
             onClick={() => dispatch(setView("search"))}
-            className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${
-              currentView === "search" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
-            }`}
+            className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${currentView === "search" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
+              }`}
           >
             <Search className="size-3.5" />
             Search
@@ -161,9 +164,8 @@ export function DataTable<T>({
           <button
             type="button"
             onClick={() => dispatch(setView("savedFilters"))}
-            className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${
-              currentView === "savedFilters" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
-            }`}
+            className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${currentView === "savedFilters" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
+              }`}
           >
             <Save className="size-3.5" />
             Saved Filters
@@ -192,13 +194,22 @@ export function DataTable<T>({
               <ChevronDown className="size-3.5" />
             </Button>
           ) : (
-            <Button
-              variant="outline"
-              className="h-9 gap-1 border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
-              onClick={onOpenEditColumns}
-            >
-              <EditIcon /> Edit Columns
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                className="h-9 gap-1 border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => setIsSaveModalOpen(true)}
+              >
+                <Plus className="size-3.5" /> Save Search
+              </Button>
+              <Button
+                variant="outline"
+                className="h-9 gap-1 border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                onClick={onOpenEditColumns}
+              >
+                <EditIcon /> Edit Columns
+              </Button>
+            </>
           )}
 
           {!!isAiPanelCollapsed && (
@@ -213,13 +224,12 @@ export function DataTable<T>({
             </Button>
           )}
         </div>
-      </div>
+      </div >
 
       {currentView === "search" ? (
         <div
-          className={`relative max-h-[calc(100vh-320px)] min-h-0 overflow-auto bg-background/50 backdrop-blur-sm transition-all duration-200 ${
-            fetching ? "opacity-50" : ""
-          }`}
+          className={`relative max-h-[calc(100vh-320px)] min-h-0 overflow-auto bg-background/50 backdrop-blur-sm transition-all duration-200 ${fetching ? "opacity-50" : ""
+            }`}
         >
           {!!fetching && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/30">
@@ -246,9 +256,8 @@ export function DataTable<T>({
                   return (
                     <TableHead key={column.field as string} className={`${column.width} rounded-r-lg py-3 text-xs font-medium text-muted-foreground`}>
                       <div
-                        className={`flex items-center gap-2 ${isSortable && !fetching ? "group cursor-pointer" : ""} ${
-                          fetching ? "pointer-events-none" : ""
-                        }`}
+                        className={`flex items-center gap-2 ${isSortable && !fetching ? "group cursor-pointer" : ""} ${fetching ? "pointer-events-none" : ""
+                          }`}
                         onClick={() => isSortable && !fetching && handleSort(column.field as string)}
                       >
                         {column.title}
@@ -312,19 +321,26 @@ export function DataTable<T>({
         <div className="relative max-h-[calc(100vh-260px)] min-h-0 overflow-auto bg-background/50 backdrop-blur-sm">
           <SavedFiltersPage />
         </div>
-      )}
+      )
+      }
 
-      {currentView === "search" && !!pagination && (
-        <Pagination
-          currentPage={pagination.page}
-          lastPage={pagination.lastPage}
-          onPageChange={onPageChange}
-          className={`absolute bottom-0 left-1/2 !mt-2 -translate-x-1/2 bg-transparent transition-opacity duration-200 ${
-            fetching ? "opacity-50" : ""
-          }`}
-        />
-      )}
-    </div>
+      {
+        currentView === "search" && !!pagination && (
+          <Pagination
+            currentPage={pagination.page}
+            lastPage={pagination.lastPage}
+            onPageChange={onPageChange}
+            className={`absolute bottom-0 left-1/2 !mt-2 -translate-x-1/2 bg-transparent transition-opacity duration-200 ${fetching ? "opacity-50" : ""
+              }`}
+          />
+        )
+      }
+      <SaveFilter
+        open={isSaveModalOpen}
+        onOpenChange={(val) => setIsSaveModalOpen(val)}
+        entityType={entityType}
+      />
+    </div >
   )
 }
 

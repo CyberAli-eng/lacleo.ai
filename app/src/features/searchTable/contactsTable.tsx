@@ -390,6 +390,7 @@ export function ContactsTable() {
             onRowClick={(row) => {
               dispatch(openContactInfoForContact(row as ContactAttributes))
             }}
+            entityType="contact"
           />
         </div>
       </div>

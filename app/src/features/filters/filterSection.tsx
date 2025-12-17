@@ -30,11 +30,10 @@ import {
 
 const FilterTag = ({ item, onRemove }: { item: SelectedFilter; onRemove: () => void }) => (
   <span
-    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-normal transition-colors ${
-      item.type === "include"
+    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-normal transition-colors ${item.type === "include"
         ? "bg-[#335CFF] text-white ring-1 ring-emerald-200/50 dark:bg-[#335CFF] dark:text-white dark:ring-[#335CFF]"
         : "bg-red-200 text-red-950 ring-1 ring-red-200/50 dark:bg-red-950/50 dark:text-red-400 dark:ring-red-800/50"
-    }`}
+      }`}
   >
     {item.name}
     <button onClick={onRemove} className="rounded-full p-0.5 transition-colors hover:bg-black/10 dark:hover:bg-white/10" aria-label="Remove filter">
@@ -159,9 +158,8 @@ export const Filters = () => {
 
     return (
       <div
-        className={`border-b border-gray-100  dark:border-gray-800/50 ${
-          isOpen ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
-        }`}
+        className={`border-b border-gray-100  dark:border-gray-800/50 ${isOpen ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
+          }`}
       >
         <SectionHeader title={title} expanded={isOpen} onClick={() => dispatch(toggleSection(id))} />
         {!!isOpen && (
@@ -296,9 +294,8 @@ export const Filters = () => {
                 .map((filter) => (
                   <div key={filter.id}>
                     <div
-                      className={`border-b border-gray-100 dark:border-gray-800/50 ${
-                        expandedSections[filter.id] ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
-                      }`}
+                      className={`border-b border-gray-100 dark:border-gray-800/50 ${expandedSections[filter.id] ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
+                        }`}
                     >
                       <SectionHeader title={filter.name} expanded={expandedSections[filter.id]} onClick={() => dispatch(toggleSection(filter.id))} />
                       {!!expandedSections[filter.id] && (
@@ -403,9 +400,8 @@ export const Filters = () => {
 
               {group.group_name.toLowerCase() === "personal" && (
                 <div
-                  className={`border-b border-gray-100 dark:border-gray-800/50 ${
-                    expandedSections[personalSectionId] ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
-                  }`}
+                  className={`border-b border-gray-100 dark:border-gray-800/50 ${expandedSections[personalSectionId] ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
+                    }`}
                 >
                   <SectionHeader
                     title="Years of Experience"
@@ -423,7 +419,7 @@ export const Filters = () => {
           </div>
         ))}
       </Card>
-      <SaveFilter open={isSaveOpen} onOpenChange={setIsSaveOpen} />
+      <SaveFilter open={isSaveOpen} onOpenChange={setIsSaveOpen} entityType={isPeoplePage ? "contact" : "company"} />
       <BulkCompanyInputDialog open={isBulkOpen} onOpenChange={setIsBulkOpen} />
     </div>
   )

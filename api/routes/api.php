@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\v1\ExportController;
 use App\Http\Controllers\Api\v1\LogoController;
 use App\Http\Controllers\Api\v1\RevealController;
 use App\Http\Controllers\Api\v1\SearchController;
+use App\Http\Controllers\Api\v1\SavedFilterController;
 use App\Http\Controllers\Api\v1\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -170,4 +171,10 @@ Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::clas
         ]));
     Route::post('/company/{id}/social/refresh', [CompanyController::class, 'refreshSocial'])->middleware('admin');
     Route::get('/contact-enrichment/{requestId}', [EnrichmentController::class, 'show']);
+
+    // Saved Filters
+    Route::get('/saved-filters', [SavedFilterController::class, 'index']);
+    Route::post('/saved-filters', [SavedFilterController::class, 'store']);
+    Route::delete('/saved-filters/{id}', [SavedFilterController::class, 'destroy']);
+    Route::put('/saved-filters/{id}', [SavedFilterController::class, 'update']);
 });

@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use App\Services\SearchService;
 
 class ExportController extends Controller
 {
@@ -43,7 +42,7 @@ class ExportController extends Controller
         } else {
             try {
                 if ($validated['type'] === 'contacts') {
-                    $base = Contact::elastic()->filter(['terms' => ['_id' => $validated['ids']]]);
+                    $base = Contact::elastic()->index((new Contact())->elasticReadAlias())->filter(['terms' => ['_id' => $validated['ids']]]);
                     if (!empty($validated['limit'])) {
                         $data = $base->select(['emails', 'email', 'work_email', 'personal_email', 'phone_numbers', 'phone_number', 'mobile_phone'])->paginate(1, (int) $validated['limit'])['data'] ?? [];
                         $contactsIncluded = count($data);
@@ -94,7 +93,7 @@ class ExportController extends Controller
                     }, $companies);
                     $companiesNorm = array_values(array_filter($companiesNorm));
 
-                    $builder = Contact::elastic();
+                    $builder = Contact::elastic()->index((new Contact())->elasticReadAlias());
                     foreach ($companiesNorm as $company) {
                         if (!empty($company['website'])) {
                             $builder->should(['match' => ['website' => $company['website']]]);
@@ -116,18 +115,14 @@ class ExportController extends Controller
                                 $phoneCount++;
                             }
                         }
+                        // include company-level phones in preview for companies export
                         $companyPhone = 0;
-                        $companyEmail = 0;
                         foreach ($companiesNorm as $comp) {
-                            if (!empty($comp['company_phone']) || !empty($comp['phone_number'])) {
+                            if (!empty($comp['company_phone'])) {
                                 $companyPhone++;
-                            }
-                            if (!empty($comp['work_email']) || (!empty($comp['emails']) && is_array($comp['emails']) && count($comp['emails']) > 0)) {
-                                $companyEmail++;
                             }
                         }
                         $phoneCount += $companyPhone;
-                        $emailCount += $companyEmail;
                     } else {
                         $page = 1;
                         $per = 1000;
@@ -151,18 +146,14 @@ class ExportController extends Controller
                             $page++;
                             $result = $builder->select(['emails', 'email', 'work_email', 'personal_email', 'phone_numbers', 'phone_number', 'mobile_phone'])->paginate($page, $per);
                         }
+                        // include company-level phones in preview for companies export
                         $companyPhone = 0;
-                        $companyEmail = 0;
                         foreach ($companiesNorm as $comp) {
-                            if (!empty($comp['company_phone']) || !empty($comp['phone_number'])) {
+                            if (!empty($comp['company_phone'])) {
                                 $companyPhone++;
-                            }
-                            if (!empty($comp['work_email']) || (!empty($comp['emails']) && is_array($comp['emails']) && count($comp['emails']) > 0)) {
-                                $companyEmail++;
                             }
                         }
                         $phoneCount += $companyPhone;
-                        $emailCount += $companyEmail;
                     }
                 }
             } catch (\Elastic\Elasticsearch\Exception\ClientResponseException $e) {
@@ -185,11 +176,8 @@ class ExportController extends Controller
 
         $emailSelected = (bool) (($validated['fields']['email'] ?? true));
         $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
-        $sanitizeFlag = (bool) ($validated['sanitize'] ?? false);
-        $excludeSensitive = (bool) ($request->boolean('exclude_sensitive'));
-        $sanitizeEffective = $sanitizeFlag || ($excludeSensitive) || ((!$emailSelected) && (!$phoneSelected));
         $creditsRequired = (($emailSelected ? $emailCount : 0) * 1) + (($phoneSelected ? $phoneCount : 0) * 4);
-        if ($sanitizeEffective) {
+        if (!empty($validated['sanitize'])) {
             $creditsRequired = 0;
         }
 
@@ -208,249 +196,11 @@ class ExportController extends Controller
             'email_count' => $emailCount,
             'phone_count' => $phoneCount,
             'credits_required' => (int) $creditsRequired,
-            'total_rows' => (int) $totalRows,
+            'total_rows' => (int) $totalRows,   
             'can_export_free' => (bool) $canExportFree,
             'remaining_before' => (int) $balance,
             'remaining_after' => max(0, (int) $balance - (int) $creditsRequired),
         ]);
-    }
-
-    public function __construct(protected SearchService $searchService)
-    {
-    }
-
-    public function exportByQuery(Request $request)
-    {
-        $validated = $request->validate([
-            'type' => 'required|in:contacts,companies',
-            'searchTerm' => 'sometimes|nullable|string',
-            'filter_dsl' => 'sometimes|array',
-            'limit' => 'sometimes|integer|min:1',
-            'fields' => 'sometimes|array',
-            'fields.email' => 'sometimes|boolean',
-            'fields.phone' => 'sometimes|boolean',
-            'sanitize' => 'sometimes|boolean',
-        ]);
-
-        $type = $validated['type'];
-        $emailSelected = (bool) (($validated['fields']['email'] ?? true));
-        $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
-        $sanitizeFlag = !empty($validated['sanitize']);
-        $excludeSensitive = (bool) ($request->boolean('exclude_sensitive'));
-        $sanitize = $sanitizeFlag || $excludeSensitive || ((!$emailSelected) && (!$phoneSelected));
-
-        // Use a reasonable chunk size for streaming (e.g., 500 records per Elasticsearch page)
-        // Note: Deep pagination (>10k) still requires search_after, but streaming handles the PHP memory limit issue.
-        $exportLimit = (int) ($validated['limit'] ?? 1000);
-
-        // 1. Initial Search to Validate and Prepare
-        try {
-            // For now, we still rely on the SearchService to get the initial hit count or IDs
-            // But for true streaming of "All Results", we should ideally bypass the simple search wrapper 
-            // and use a scrolling cursor or deep pagination loop.
-            // Given the current constraints and immediate fix request, we will iterate using standard pagination 
-            // loop inside the stream callback, up to the 10k window limit or until exportLimit.
-
-            // NOTE: SearchService as-is supports basic pagination.
-        } catch (\Throwable $e) {
-            return response()->json(['error' => 'SEARCH_FAILED', 'message' => 'Unable to initiate export'], 422);
-        }
-
-        $requestId = $request->header('request_id') ?: strtolower(Str::ulid());
-
-        // Validate Credits FIRST (approximate check based on request size or just check > 0)
-        // For strict prepaid billing on streamed exports, complex logic is needed (lock credits chunks).
-        // Here we will do a check for minimum viability.
-        $user = $request->user();
-        $workspace = \App\Models\Workspace::firstOrCreate(['owner_user_id' => $user->id], ['id' => (string) strtolower(Str::ulid()), 'credit_balance' => 0]);
-        if ($workspace->credit_balance <= 0 && !$sanitize) {
-            return response()->json(['error' => 'INSUFFICIENT_CREDITS', 'message' => 'Zero balance'], 402);
-        }
-
-        $headers = [
-            'Content-Type' => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="export_' . $type . '_' . date('Y-m-d_H-i-s') . '.csv"',
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-            'X-Accel-Buffering' => 'no', // Nginx: disable buffering
-        ];
-
-        return response()->stream(function () use ($validated, $type, $exportLimit, $sanitize, $emailSelected, $phoneSelected, $workspace, $requestId) {
-            $out = fopen('php://output', 'w');
-
-            // Write Headers
-            $csvHeaders = match (true) {
-                $sanitize => \App\Exports\ExportCsvBuilder::CONTACT_HEADERS_FREE,
-                ($emailSelected && $phoneSelected) => \App\Exports\ExportCsvBuilder::FULL_HEADER,
-                ($emailSelected && !$phoneSelected) => \App\Exports\ExportCsvBuilder::EMAIL_ONLY_HEADER,
-                (!$emailSelected && $phoneSelected) => \App\Exports\ExportCsvBuilder::PHONE_ONLY_HEADER,
-                default => \App\Exports\ExportCsvBuilder::FREE_EXPORT_HEADER,
-            };
-            if ($type === 'companies') {
-                // Simplified header selection for companies dynamic export (using Full for validation)
-                // In a perfect refactor, ExportCsvBuilder would provide dynamic company headers too.
-                $csvHeaders = \App\Exports\ExportCsvBuilder::FULL_HEADER;
-                if ($sanitize)
-                    $csvHeaders = \App\Exports\ExportCsvBuilder::COMPANY_HEADERS_FREE;
-            }
-
-            fputcsv($out, $csvHeaders);
-            flush();
-
-            // Loop Config
-            $page = 1;
-            $perPage = 500; // Chunk size
-            $fetched = 0;
-            $totalCredits = 0;
-            $stats = ['email' => 0, 'phone' => 0];
-
-            while ($fetched < $exportLimit) {
-                $remaining = $exportLimit - $fetched;
-                $thisPageLimit = min($perPage, $remaining);
-
-                // Fetch Chunk
-                try {
-                    $entity = $type === 'contacts' ? 'contact' : 'company';
-                    $chunkResults = $this->searchService->search(
-                        $entity,
-                        $validated['searchTerm'] ?? null,
-                        (array) ($validated['filter_dsl'] ?? []),
-                        [],
-                        $page,
-                        $perPage
-                    );
-                } catch (\Exception $e) {
-                    break;
-                }
-
-                $items = (array) ($chunkResults['data'] ?? []);
-                if (empty($items)) {
-                    break;
-                }
-
-                $ids = array_column($items, 'id');
-                if (empty($ids)) {
-                    // Fallback if ids not in root (shouldn't happen with standard search)
-                    break;
-                }
-
-                // Hydrate Full Models for CSV
-                $batchIds = array_slice($ids, 0, $thisPageLimit);
-                $rowsData = [];
-
-                if ($type === 'contacts') {
-                    $rowsResults = Contact::elastic()
-                        ->filter(['terms' => ['_id' => $batchIds]])
-                        ->select(['full_name', 'emails', 'phone_numbers', 'phone_number', 'mobile_phone', 'company', 'website', 'title', 'department'])
-                        ->paginate(1, count($batchIds));
-                    $rowsData = array_map(fn($c) => RecordNormalizer::normalizeContact($c), (array) ($rowsResults['data'] ?? []));
-                } else {
-                    $companies = array_map(fn($id) => Company::findInElastic($id), $batchIds);
-                    $companies = array_filter($companies);
-                    $compsNorm = array_map(fn($c) => RecordNormalizer::normalizeCompany(is_array($c) ? $c : $c->toArray()), $companies);
-
-                    // For company export, we find contacts for these companies? 
-                    // The original code did a complex join. We will simplify for stream:
-                    // 1 row per company if no contacts found, or multi-row join.
-
-                    // optimization: pre-fetch contacts for these companies
-                    // We will implement simpler company export: 1 row per company for now to match streaming ease,
-                    // unless user strictly needs the join. The original code did:
-                    // $contacts = ... match company name/website ...
-                    // Let's replicate that logic in miniature for the chunk.
-                    foreach ($compsNorm as $comp) {
-                        $b = Contact::elastic();
-                        if (!empty($comp['website']))
-                            $b->should(['match' => ['website' => $comp['website']]]);
-                        if (!empty($comp['name']))
-                            $b->should(['match' => ['company' => $comp['name']]]);
-                        $b->setBoolParam('minimum_should_match', 1);
-
-                        $compContacts = $b->select(['full_name', 'emails', 'phone_numbers', 'title'])->paginate(1, 5)['data'] ?? [];
-
-                        if (empty($compContacts)) {
-                            // Write company row
-                            $row = $sanitize
-                                ? \App\Exports\ExportCsvBuilder::composeCompanyRowFree($comp, null)
-                                : \App\Exports\ExportCsvBuilder::composeCompanyRowDynamic($comp, null, $emailSelected, $phoneSelected);
-                            fputcsv($out, $row);
-                            $fetched++;
-                        } else {
-                            foreach ($compContacts as $cc) {
-                                $ccNorm = RecordNormalizer::normalizeContact($cc);
-                                $row = $sanitize
-                                    ? \App\Exports\ExportCsvBuilder::composeCompanyRowFree($comp, $ccNorm)
-                                    : \App\Exports\ExportCsvBuilder::composeCompanyRowDynamic($comp, $ccNorm, $emailSelected, $phoneSelected);
-                                fputcsv($out, $row);
-                                $fetched++;
-                            }
-                        }
-                    }
-                    // Skip the standard write below for companies since we handled it inside loop
-                    flush();
-                    $page++;
-                    continue;
-                }
-
-                // Write Contact Rows
-                foreach ($rowsData as $c) {
-                    if ($sanitize) {
-                        $row = \App\Exports\ExportCsvBuilder::composeContactRowFree($c);
-                    } else {
-                        $row = \App\Exports\ExportCsvBuilder::composeContactRowDynamic($c, $emailSelected, $phoneSelected);
-
-                        // Calculate Credit Cost (accumulate)
-                        $hasEmail = !empty(RecordNormalizer::getPrimaryEmail($c));
-                        $hasPhone = !empty(RecordNormalizer::getPrimaryPhone($c));
-                        $cost = ($hasEmail && $emailSelected ? 1 : 0) + ($hasPhone && $phoneSelected ? 4 : 0);
-                        $totalCredits += $cost;
-                        if ($hasEmail)
-                            $stats['email']++;
-                        if ($hasPhone)
-                            $stats['phone']++;
-                    }
-
-                    if (implode('', $row) !== '') {
-                        fputcsv($out, $row);
-                    }
-                }
-
-                flush();
-                $fetched += count($rowsData);
-                $page++;
-
-                // Safety Break for loop limits (Elastic 10k window)
-                if ($page * $perPage >= 10000) {
-                    break;
-                }
-            }
-
-            fclose($out);
-
-            // Post-Export Billing (Deduct Accumulated Credits)
-            // Note: In a real streamed response, it's too late to return error JSON. 
-            // We just record the transaction. If they go negative, they go negative.
-            if ($totalCredits > 0 && !$sanitize) {
-                \DB::transaction(function () use ($workspace, $totalCredits, $requestId, $type, $fetched, $stats) {
-                    $ws = \App\Models\Workspace::where('id', $workspace->id)->lockForUpdate()->first();
-                    $ws->decrement('credit_balance', $totalCredits);
-                    \App\Models\CreditTransaction::create([
-                        'workspace_id' => $ws->id,
-                        'amount' => -$totalCredits,
-                        'type' => 'spend',
-                        'meta' => [
-                            'category' => 'export_stream',
-                            'request_id' => $requestId,
-                            'type' => $type,
-                            'rows' => $fetched,
-                            'stats' => $stats
-                        ],
-                    ]);
-                });
-            }
-
-        }, 200, $headers);
     }
 
     public function export(Request $request)
@@ -494,7 +244,7 @@ class ExportController extends Controller
         $limit = (int) ($validated['limit'] ?? self::EXPORT_PAGE_SIZE());
         $limit = min($limit, self::EXPORT_PAGE_SIZE());
         if ($validated['type'] === 'contacts') {
-            $result = Contact::elastic()
+            $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
                 ->filter(['terms' => ['_id' => $validated['ids']]])
                 ->select(['full_name', 'emails', 'phone_numbers', 'phone_number', 'mobile_phone', 'company', 'website', 'title', 'department'])
                 ->paginate(1, $limit);
@@ -513,7 +263,7 @@ class ExportController extends Controller
             }, $companies);
             $companiesNorm = array_values(array_filter($companiesNorm));
 
-            $builder = Contact::elastic();
+            $builder = Contact::elastic()->index((new Contact())->elasticReadAlias());
             foreach ($companiesNorm as $company) {
                 if (!empty($company['website'])) {
                     $builder->should(['match' => ['website' => $company['website']]]);
@@ -533,42 +283,9 @@ class ExportController extends Controller
             return response()->json(['error' => 'Too many records'], 422);
         }
 
-        $sanitizeFlag = !empty($validated['sanitize']);
-        $excludeSensitive = (bool) ($request->boolean('exclude_sensitive'));
+        $sanitize = !empty($validated['sanitize']);
         $emailSelected = (bool) (($validated['fields']['email'] ?? true));
         $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
-        $sanitize = $sanitizeFlag || $excludeSensitive || ((!$emailSelected) && (!$phoneSelected));
-        if ($sanitize) {
-            $contacts = array_map(function ($c) {
-                unset($c['work_email'], $c['personal_email'], $c['email']);
-                unset($c['mobile_phone'], $c['direct_number'], $c['phone_number']);
-                if (isset($c['emails'])) {
-                    $c['emails'] = [];
-                }
-                if (isset($c['phones'])) {
-                    $c['phones'] = [];
-                }
-                if (isset($c['phone_numbers'])) {
-                    $c['phone_numbers'] = [];
-                }
-                return $c;
-            }, $contacts);
-            $companiesNorm = (array) $request->attributes->get('export_companies');
-            $companiesNorm = array_map(function ($comp) {
-                unset($comp['work_email'], $comp['personal_email'], $comp['email']);
-                unset($comp['company_phone'], $comp['phone_number']);
-                if (isset($comp['emails'])) {
-                    $comp['emails'] = [];
-                }
-                if (isset($comp['phone_numbers'])) {
-                    $comp['phone_numbers'] = [];
-                }
-                return $comp;
-            }, $companiesNorm);
-            $request->attributes->set('export_companies', $companiesNorm);
-            $emailSelected = true;
-            $phoneSelected = true;
-        }
         if ($validated['type'] === 'companies') {
             $csv = \App\Exports\ExportCsvBuilder::buildCompaniesCsvDynamic((array) $request->attributes->get('export_companies'), $contacts, $emailSelected, $phoneSelected);
         } else {
@@ -658,7 +375,7 @@ class ExportController extends Controller
         $hasEmail = 0;
         $hasPhone = 0;
         try {
-            $result = Contact::elastic()
+            $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
                 ->filter(['terms' => ['_id' => $ids]])
                 ->select(['emails', 'email', 'work_email', 'personal_email', 'phone_numbers', 'phone', 'mobile_number', 'direct_number'])
                 ->paginate(1, max(1, min(count($ids), 1000)));
@@ -839,5 +556,5 @@ class ExportController extends Controller
             + ($fieldsToggle['phone'] ? $phoneCount : 0) * 4;
 
         return ['credits_required' => $credits];
-    }
+  }
 }
