@@ -266,7 +266,7 @@ class ExportCsvBuilder
 
     public static function buildContactsCsv(array $contacts, bool $sanitize = false): string
     {
-        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+        $contactsNorm = array_map(fn($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
         // Column set is driven purely by export mode:
         // - $sanitize = false → paid export (includes emails/phones)
         // - $sanitize = true  → free export (no emails/phones)
@@ -290,11 +290,11 @@ class ExportCsvBuilder
 
     public static function buildContactsCsvDynamic(array $contacts, bool $emailSelected, bool $phoneSelected): string
     {
-        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+        $contactsNorm = array_map(fn($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
         $headers = match (true) {
             $emailSelected && $phoneSelected => self::FULL_HEADER,
-            $emailSelected && ! $phoneSelected => self::EMAIL_ONLY_HEADER,
-            ! $emailSelected && $phoneSelected => self::PHONE_ONLY_HEADER,
+            $emailSelected && !$phoneSelected => self::EMAIL_ONLY_HEADER,
+            !$emailSelected && $phoneSelected => self::PHONE_ONLY_HEADER,
             default => self::FREE_EXPORT_HEADER,
         };
         $out = fopen('php://temp', 'r+');
@@ -315,8 +315,8 @@ class ExportCsvBuilder
 
     public static function buildCompaniesCsvDynamic(array $companies, array $contacts, bool $emailSelected, bool $phoneSelected): string
     {
-        $companiesNorm = array_map(fn ($c) => RecordNormalizer::normalizeCompany(is_array($c) ? $c : ($c ? $c->toArray() : [])), $companies);
-        $contactsNorm = array_map(fn ($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
+        $companiesNorm = array_map(fn($c) => RecordNormalizer::normalizeCompany(is_array($c) ? $c : ($c ? $c->toArray() : [])), $companies);
+        $contactsNorm = array_map(fn($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
 
         $headers = match (true) {
             $emailSelected && $phoneSelected => self::FULL_HEADER,
@@ -380,7 +380,7 @@ class ExportCsvBuilder
     // contactsHavePii/companiesHavePii are intentionally no-ops and can be
     // removed in a future cleanup without changing behaviour.
 
-    private static function composeContactRowPii(array $c, bool $sanitize): array
+    public static function composeContactRowPii(array $c, bool $sanitize): array
     {
         $primaryEmail = $sanitize ? '' : (string) (RecordNormalizer::getPrimaryEmail($c) ?? '');
         $workEmail = $sanitize ? '' : (string) ($c['work_email'] ?? '');
@@ -388,7 +388,7 @@ class ExportCsvBuilder
             $workEmail = $primaryEmail;
         }
         $personalEmail = $sanitize ? '' : (string) ($c['personal_email'] ?? '');
-        if ($personalEmail === '' && ! $sanitize) {
+        if ($personalEmail === '' && !$sanitize) {
             $secondary = '';
             foreach (($c['emails'] ?? []) as $e) {
                 $val = (string) ($e['email'] ?? '');
@@ -418,7 +418,7 @@ class ExportCsvBuilder
         ];
     }
 
-    private static function composeContactRowFree(array $c): array
+    public static function composeContactRowFree(array $c): array
     {
         return [
             (string) ($c['domain'] ?? ''),
@@ -434,7 +434,7 @@ class ExportCsvBuilder
         ];
     }
 
-    private static function composeContactRowDynamic(array $c, bool $emailSelected, bool $phoneSelected): array
+    public static function composeContactRowDynamic(array $c, bool $emailSelected, bool $phoneSelected): array
     {
         $primaryEmail = $emailSelected ? (string) (RecordNormalizer::getPrimaryEmail($c) ?? '') : '';
         $workEmail = $emailSelected ? (string) ($c['work_email'] ?? '') : '';
@@ -496,7 +496,7 @@ class ExportCsvBuilder
         ];
     }
 
-    private static function composeCompanyRowDynamic(array $comp, ?array $c, bool $emailSelected, bool $phoneSelected): array
+    public static function composeCompanyRowDynamic(array $comp, ?array $c, bool $emailSelected, bool $phoneSelected): array
     {
         $contactCity = (string) ($c['city'] ?? '');
         $contactState = (string) ($c['state'] ?? '');
@@ -567,7 +567,7 @@ class ExportCsvBuilder
         ];
     }
 
-    private static function composeCompanyRowFree(array $comp, ?array $c): array
+    public static function composeCompanyRowFree(array $comp, ?array $c): array
     {
         $contactCity = (string) ($c['city'] ?? '');
         $contactState = (string) ($c['state'] ?? '');

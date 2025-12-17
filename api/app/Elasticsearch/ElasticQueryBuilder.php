@@ -35,6 +35,8 @@ class ElasticQueryBuilder
 
     protected ?array $knn = null;
 
+    protected ?array $searchAfter = null;
+
     public function __construct(protected string $model)
     {
     }
@@ -42,6 +44,12 @@ class ElasticQueryBuilder
     public function knn(array $config): self
     {
         $this->knn = $config;
+        return $this;
+    }
+
+    public function searchAfter(array $values): self
+    {
+        $this->searchAfter = $values;
         return $this;
     }
 
@@ -363,6 +371,7 @@ class ElasticQueryBuilder
             'highlight' => $this->highlight,
             'aggs' => $this->aggregations,
             'min_score' => $this->minimumScore,
+            'search_after' => $this->searchAfter,
         ]));
     }
 

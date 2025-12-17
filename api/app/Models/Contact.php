@@ -100,6 +100,11 @@ class Contact extends Model
         return trim($prefix . '_' . strtolower(class_basename($this)), '_');
     }
 
+    public function elasticReadAlias(): string
+    {
+        return $this->elasticIndex() . '_read';
+    }
+
     public function elasticSettings(): array
     {
         return [

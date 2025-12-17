@@ -27,6 +27,11 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_ACCOUNT_HOST || "https://local-accounts.lacleo.test",
           changeOrigin: true,
           secure: false
+        },
+        "/api": {
+          target: env.VITE_API_HOST || "https://local-api.lacleo.test",
+          changeOrigin: true,
+          secure: false
         }
       }
     },

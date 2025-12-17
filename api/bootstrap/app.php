@@ -45,7 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'request.timeout' => \App\Http\Middleware\RequestTimeout::class,
                 'csrf.guard' => \App\Http\Middleware\CsrfGuard::class,
             ]);
-            $middleware->append(HandleCors::class);
+            $middleware->prepend(HandleCors::class);
         })
         ->withExceptions(function (Exceptions $exceptions) {
             $exceptions->renderable(function (AuthenticationException $e, $request) {

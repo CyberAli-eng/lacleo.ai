@@ -33,7 +33,7 @@ trait HasElasticIndex
     {
         $class = static::class;
 
-        if (! isset(static::$indexConfigurations[$class])) {
+        if (!isset(static::$indexConfigurations[$class])) {
             static::$indexConfigurations[$class] = [
                 'name' => $this->getIndexName(),
                 'dynamic' => $this->getDynamicMapSetting(),
@@ -65,6 +65,32 @@ trait HasElasticIndex
         $basename = strtolower(class_basename($this));
 
         return trim("{$prefix}_{$basename}", '_');
+    }
+
+    /**
+     * Get the alias used for reading (searching).
+     * Defaults to the main index name (which should be an alias).
+     */
+    public function getReadAlias(): string
+    {
+        if (method_exists($this, 'elasticReadAlias')) {
+            return $this->elasticReadAlias();
+        }
+        // If specific _read alias env var exists (optional pattern)
+        // But better to let the model override it.
+        return $this->getIndexName();
+    }
+
+    /**
+     * Get the alias used for writing.
+     * Defaults to the main index name.
+     */
+    public function getWriteAlias(): string
+    {
+        if (method_exists($this, 'elasticWriteAlias')) {
+            return $this->elasticWriteAlias();
+        }
+        return $this->getIndexName();
     }
 
     /**
@@ -117,7 +143,7 @@ trait HasElasticIndex
         try {
             $name = strtolower(class_basename($this));
 
-            $mappingPath = config('elasticsearch.mappings_path', '')."/$name.json";
+            $mappingPath = config('elasticsearch.mappings_path', '') . "/$name.json";
 
             if (File::exists($mappingPath)) {
                 $mapping = json_decode(File::get($mappingPath), true);
@@ -172,13 +198,13 @@ trait HasElasticIndex
         try {
             // Alias-based non-destructive creation
             $alias = $config['name'];
-            $suffix = '_v'.date('YmdHis');
-            $index = $alias.$suffix;
+            $suffix = '_v' . date('YmdHis');
+            $index = $alias . $suffix;
 
             // Guard against destructive ops
             $env = config('app.env');
             $allowDestructive = filter_var(env('ELASTIC_ALLOW_DESTRUCTIVE', false), FILTER_VALIDATE_BOOLEAN);
-            if ($force && $env !== 'local' && ! $allowDestructive) {
+            if ($force && $env !== 'local' && !$allowDestructive) {
                 throw new Exception('Destructive refresh blocked outside local');
             }
 
@@ -188,7 +214,7 @@ trait HasElasticIndex
             } catch (\Throwable $e) {
                 return ['error' => 'ELASTIC_UNAVAILABLE', 'message' => 'Search backend is unavailable'];
             }
-            if (! $exists) {
+            if (!$exists) {
                 static::$elasticClient->getClient()->indices()->create([
                     'index' => $index,
                     'body' => [
@@ -324,11 +350,11 @@ trait HasElasticIndex
         $filtered = [];
 
         foreach ($mapping as $field => $map) {
-            if (! isset($data[$field])) {
+            if (!isset($data[$field])) {
                 continue;
             }
 
-            if (! isset($map['properties'])) {
+            if (!isset($map['properties'])) {
                 $filtered[$field] = $data[$field];
 
                 continue;
@@ -337,7 +363,7 @@ trait HasElasticIndex
             $isNested = $map['type'] ?? '' === 'nested';
             if ($isNested && is_array($data[$field])) {
                 $filtered[$field] = array_map(
-                    fn ($item) => is_array($item) ? $this->filterByMapping($item, $map['properties']) : $item,
+                    fn($item) => is_array($item) ? $this->filterByMapping($item, $map['properties']) : $item,
                     $data[$field]
                 );
             } elseif (is_array($data[$field])) {

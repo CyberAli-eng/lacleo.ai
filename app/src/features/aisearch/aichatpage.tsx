@@ -51,6 +51,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
   const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0)
   const [inferredEntity, setInferredEntity] = useState<"contacts" | "companies" | null>(null)
   const [hasProcessedInitialQuery, setHasProcessedInitialQuery] = useState(false)
+  const [pendingDsl, setPendingDsl] = useState<{ contact: Record<string, unknown>; company: Record<string, unknown> } | null>(null)
 
   // Redux selectors
   const isProcessingCriteria = useSelector(selectIsProcessingCriteria)
@@ -218,41 +219,43 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
       try {
         dispatch(resetFilters())
 
-        const allFilters = (filterGroups || []).flatMap((g) => g.filters)
+        if (pendingDsl && (Object.keys(pendingDsl.contact).length || Object.keys(pendingDsl.company).length)) {
+          dispatch(importFiltersFromDSL(pendingDsl))
+        } else {
+          const allFilters = (filterGroups || []).flatMap((g) => g.filters)
 
-        criteria
-          .filter((c) => c.checked)
-          .forEach((c) => {
-            let filterId = c.id.toLowerCase()
+          criteria
+            .filter((c) => c.checked)
+            .forEach((c) => {
+              let filterId = c.id.toLowerCase()
 
-            if (filterId === "revenue" || filterId === "annual_revenue") filterId = "company_revenue"
-            if (filterId === "headcount" || filterId === "company_headcount") filterId = "employee_count"
-            if (filterId === "experience") filterId = "years_of_experience"
+              if (filterId === "revenue" || filterId === "annual_revenue") filterId = "company_revenue"
+              if (filterId === "headcount" || filterId === "company_headcount") filterId = "employee_count"
+              if (filterId === "experience") filterId = "years_of_experience"
 
-            const matched =
-              allFilters.find((f) => f.name.toLowerCase() === c.label.toLowerCase()) ||
-              allFilters.find((f) => f.id.toLowerCase() === filterId) ||
-              allFilters.find((f) => f.id.toLowerCase() === c.id.toLowerCase())
+              const matched =
+                allFilters.find((f) => f.name.toLowerCase() === c.label.toLowerCase()) ||
+                allFilters.find((f) => f.id.toLowerCase() === filterId) ||
+                allFilters.find((f) => f.id.toLowerCase() === c.id.toLowerCase())
 
-            if (matched) {
-              dispatch(
-                addSelectedItem({
-                  sectionId: matched.id,
-                  item: { id: c.value, name: c.value, type: "include" }
-                })
-              )
-            } else if (c.id === "company_keywords" || c.id === FILTER_KEYS.CUSTOM) {
-              // Ensure keywords and custom dynamic chips are added to company_keywords
-              // This leverages the unified search power for loose concepts
-              dispatch(
-                addSelectedItem({
-                  sectionId: "company_keywords",
-                  item: { id: c.value, name: c.value, type: "include" },
-                  isCompanyFilter: true
-                })
-              )
-            }
-          })
+              if (matched) {
+                dispatch(
+                  addSelectedItem({
+                    sectionId: matched.id,
+                    item: { id: c.value, name: c.value, type: "include" }
+                  })
+                )
+              } else if (c.id === "company_keywords" || c.id === FILTER_KEYS.CUSTOM) {
+                dispatch(
+                  addSelectedItem({
+                    sectionId: "company_keywords",
+                    item: { id: c.value, name: c.value, type: "include" },
+                    isCompanyFilter: true
+                  })
+                )
+              }
+            })
+        }
 
         if (!mountedRef.current) return
 
@@ -281,7 +284,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
         }
       }
     },
-    [addMessage, dispatch, filterGroups, navigate, inferredEntity]
+    [addMessage, dispatch, filterGroups, navigate, inferredEntity, pendingDsl]
   )
 
   useEffect(() => {
@@ -368,7 +371,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
           } else if (key === "seniority") {
             ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "seniority", String(v)))
           } else if (key === "years_experience" || key === "years_of_experience") {
-            setRange(dsl.contact, "years_of_experience", val)
+            setRange(dsl.contact, "experience_years", val)
           } else if (key === "location") {
             const loc = val as { country?: string[]; state?: string[]; city?: string[] }
             if (loc.country) loc.country.forEach((v) => ensureInclude(dsl.company, "locations", v))
@@ -393,7 +396,8 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
           }
         }
 
-        // Dispatch that criteria processing is finished
+        // Persist DSL for Apply step and mark criteria processing finished
+        setPendingDsl(dsl)
         dispatch(finishCriteriaProcessing())
 
         // Create a stable component instance to prevent re-renders

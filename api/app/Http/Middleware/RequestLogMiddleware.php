@@ -46,8 +46,14 @@ class RequestLogMiddleware
                     'ip' => $ip,
                 ],
             ];
-            Log::channel(config('logging.channels.structured') ? 'structured' : 'stack')->debug(json_encode($payload));
-            app(\App\Services\ErrorReporter::class)->reportException($e, $request);
+            try {
+                Log::channel(config('logging.channels.structured') ? 'structured' : 'stack')->debug(json_encode($payload));
+                if (class_exists(\App\Services\ErrorReporter::class)) {
+                    app(\App\Services\ErrorReporter::class)->reportException($e, $request);
+                }
+            } catch (\Throwable $loggingError) {
+                // Squelch logging errors to prevent hiding the original exception
+            }
             throw $e;
         }
         $latency = (int) ((microtime(true) - $start) * 1000);

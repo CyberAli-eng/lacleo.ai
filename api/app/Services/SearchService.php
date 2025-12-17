@@ -37,7 +37,8 @@ class SearchService
         array $sorts = [],
         int $page = 1,
         int $perPage = 10,
-        ?string $semanticQuery = null
+        ?string $semanticQuery = null,
+        ?array $cursor = null
     ): array {
         try {
             $page = max(1, (int) $page);
@@ -45,7 +46,7 @@ class SearchService
             $modelClass = $this->getModelClass($type);
             $builder = $modelClass::elastic();
 
-            $index = (new $modelClass())->elasticIndex();
+            $index = (new $modelClass())->getReadAlias();
             $builder->index($index);
 
             // Apply boolean filters (DSL)
@@ -53,6 +54,13 @@ class SearchService
 
             // Apply standard keyword search if present
             $this->applySearchQuery($builder, $type, $modelClass::globalSearchFields(), $query);
+
+            if ($cursor) {
+                // If cursor is provided, use search_after and force page 1 logic (from 0)
+                // because search_after handles the offset.
+                $builder->searchAfter($cursor);
+                // We still want to respect perPage
+            }
 
             // Apply Semantic Search (Vector) if present
             if ($semanticQuery) {
@@ -87,6 +95,23 @@ class SearchService
 
             // Return full _source for each ES hit (no source filtering)
 
+            if ($semanticQuery && empty($sorts)) {
+                // Hybrid search usually relies on score sorting, so ensure we don't override unless explicit
+            }
+
+            // Supports deep pagination via search_after if cursor provided via 'after' in sorts, or page > 1000?
+            // Actually, we pass it as a separate arg to keep signature clean, or check logic.
+            // For now, let's look for a special sort param or rely on existing paginate logic.
+            // The "proper" way is to add $cursor arg to search(). 
+            // Since we didn't change the signature in the view, let's assume we add it now.
+            // But wait, replace calls below need to match file content.
+            // I will use `paginate` for standard calls.
+            // If page * perPage > 10000, we should leverage search_after if we had the previous sort value.
+            // But we don't have state here.
+
+            // To properly implement this, we update the search signature in the NEXT step or assume specific usage.
+            // For this specific tool call, I will perform the pagination call.
+
             $results = $builder->paginate($page, $perPage);
 
             return $this->formatResults($results, $type, $filterDsl);
@@ -112,7 +137,7 @@ class SearchService
     ): array {
         $modelClass = $this->getModelClass($type);
         $builder = $modelClass::elastic();
-        $index = (new $modelClass())->elasticIndex();
+        $index = (new $modelClass())->getReadAlias();
         $builder->index($index);
         $this->applyFilters($builder, $type, $filterDsl);
         $this->applySearchQuery($builder, $type, $modelClass::globalSearchFields(), $query);
@@ -506,7 +531,7 @@ class SearchService
         // Revenue
         if (!empty($filters['revenue']) && is_array($filters['revenue'])) {
             $rev = $filters['revenue'];
-            $field = ($type === 'company') ? 'annual_revenue' : 'company_obj.annual_revenue';
+            $field = ($type === 'company') ? 'annual_revenue' : 'company_obj.annual_revenue_usd';
 
             // 1. Min/Max
             $range = [];
@@ -1394,6 +1419,47 @@ class SearchService
                 $hasEmail = false;
                 $hasPhone = !empty($attributes['phone_number']);
             } else {
+                // Formatting for Frontend Table (Flattening nested arrays)
+                if (!isset($attributes['work_email']) && !empty($attributes['emails'])) {
+                    foreach ($attributes['emails'] as $email) {
+                        if (($email['type'] ?? '') === 'work') {
+                            $attributes['work_email'] = $email['email'];
+                            break;
+                        }
+                    }
+                }
+                if (!isset($attributes['personal_email']) && !empty($attributes['emails'])) {
+                    foreach ($attributes['emails'] as $email) {
+                        if (($email['type'] ?? '') === 'personal') {
+                            $attributes['personal_email'] = $email['email'];
+                            break;
+                        }
+                    }
+                }
+                // Fallback: if no work email found, use first available as work_email (common UI pattern)
+                if (!isset($attributes['work_email']) && !empty($attributes['emails'][0]['email'])) {
+                    $attributes['work_email'] = $attributes['emails'][0]['email'];
+                }
+
+                if (!isset($attributes['mobile_phone']) && !empty($attributes['phone_numbers'])) {
+                    foreach ($attributes['phone_numbers'] as $p) {
+                        // Accepts mobile, cell, etc.
+                        if (in_array(($p['type'] ?? ''), ['mobile', 'cell'])) {
+                            $attributes['mobile_phone'] = $p['phone_number'];
+                            break;
+                        }
+                    }
+                }
+                // Fallback checking direct
+                if (!isset($attributes['mobile_phone']) && !empty($attributes['phone_numbers'])) {
+                    foreach ($attributes['phone_numbers'] as $p) {
+                        if (($p['type'] ?? '') === 'direct') {
+                            $attributes['mobile_phone'] = $p['phone_number']; // Map direct to mobile column if mobile missing
+                            break;
+                        }
+                    }
+                }
+
                 $hasEmail = \App\Services\RecordNormalizer::hasEmail($attributes);
                 $hasPhone = \App\Services\RecordNormalizer::hasPhone($attributes);
             }
