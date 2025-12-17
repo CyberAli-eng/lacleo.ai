@@ -41,7 +41,7 @@ class RequestLogMiddleware
                 'latency_ms' => $latency,
                 'response_size' => 0,
                 'meta' => [
-                    'query' => \App\Http\Middleware\RedactSensitiveMiddleware::redactString((string) $request->getContent()),
+                    'query' => \App\Http\Middleware\RedactSensitiveMiddleware::redactArray($request->query()),
                     'params' => \App\Http\Middleware\RedactSensitiveMiddleware::redactArray($request->all()),
                     'ip' => $ip,
                 ],
@@ -55,6 +55,7 @@ class RequestLogMiddleware
                 // Squelch logging errors to prevent hiding the original exception
             }
             throw $e;
+
         }
         $latency = (int) ((microtime(true) - $start) * 1000);
         $size = 0;
@@ -77,7 +78,7 @@ class RequestLogMiddleware
             'latency_ms' => $latency,
             'response_size' => $size,
             'meta' => [
-                'query' => \App\Http\Middleware\RedactSensitiveMiddleware::redactString((string) $request->getContent()),
+                'query' => \App\Http\Middleware\RedactSensitiveMiddleware::redactArray($request->query()),
                 'params' => \App\Http\Middleware\RedactSensitiveMiddleware::redactArray($request->all()),
                 'ip' => $ip,
             ],

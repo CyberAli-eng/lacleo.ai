@@ -378,6 +378,7 @@ export function CompaniesTable() {
             onRowClick={(row) => {
               dispatch(openContactInfoForCompany(row as CompanyAttributes))
             }}
+            entityType="company"
           />
         </div>
       </div>

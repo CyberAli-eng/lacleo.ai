@@ -121,3 +121,16 @@ export interface SearchRequestParams {
   type: "contact" | "company"
   buildParams: string
 }
+
+export interface SavedFilter {
+  id: string
+  user_id: string
+  name: string
+  description?: string
+  filters: Record<string, unknown>
+  entity_type: "contact" | "company"
+  is_starred: boolean
+  tags?: string[]
+  created_at: string
+  updated_at: string
+}

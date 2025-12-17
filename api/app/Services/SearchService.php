@@ -1441,6 +1441,17 @@ class SearchService
                     $attributes['work_email'] = $attributes['emails'][0]['email'];
                 }
 
+                // Ensure full_name exists
+                if (empty($attributes['full_name'])) {
+                    $first = $attributes['first_name'] ?? '';
+                    $last = $attributes['last_name'] ?? '';
+                    if ($first || $last) {
+                        $attributes['full_name'] = trim("$first $last");
+                    } else {
+                        $attributes['full_name'] = 'Unknown Contact';
+                    }
+                }
+
                 if (!isset($attributes['mobile_phone']) && !empty($attributes['phone_numbers'])) {
                     foreach ($attributes['phone_numbers'] as $p) {
                         // Accepts mobile, cell, etc.

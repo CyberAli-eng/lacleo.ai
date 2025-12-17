@@ -1,41 +1,75 @@
-import { ChevronDown, Save, Search } from "lucide-react"
-import { useState } from "react"
+import { ChevronDown, Save, Search, Loader2 } from "lucide-react"
+import { useState, useMemo } from "react"
 import { Button } from "../button"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../dropdown-menu"
 import { Input } from "../input"
+import { useCreateSavedFilterMutation, useGetSavedFiltersQuery, useUpdateSavedFilterMutation } from "@/features/searchTable/slice/apiSlice"
+import { useSelector } from "react-redux"
+import { selectCompanyFilters, selectContactFilters } from "@/features/filters/slice/filterSlice"
+import { useToast } from "../use-toast"
+import { SavedFilter } from "@/interface/searchTable/search"
 
 type SaveFilterProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  entityType?: "contact" | "company"
 }
 
-const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
+const SaveFilter = ({ open, onOpenChange, entityType = "contact" }: SaveFilterProps) => {
   const [searchMode, setSearchMode] = useState("new")
-  const [selectedFilter, setSelectedFilter] = useState("")
+  const [selectedFilterId, setSelectedFilterId] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [newSearchName, setNewSearchName] = useState("")
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
 
-  const savedSearches = [
-    "SaaS Marketing VPs",
-    "Enterprise IT Directors",
-    "SaaS Marketing Directors",
-    "US companies Revenue >200M",
-    "US companies Revenue >200M"
-  ]
+  const [createFilter, { isLoading: isCreating }] = useCreateSavedFilterMutation()
+  const [updateFilter, { isLoading: isUpdating }] = useUpdateSavedFilterMutation()
+  const { data } = useGetSavedFiltersQuery({ type: entityType })
 
-  const filteredSearches = savedSearches.filter((search) => search.toLowerCase().includes(searchQuery.toLowerCase()))
+  const contactFilters = useSelector(selectContactFilters)
+  const companyFilters = useSelector(selectCompanyFilters)
+  const { toast } = useToast()
 
-  const handleSave = () => {
-    if (searchMode === "new") {
-      console.log("Saving new search:", newSearchName)
-    } else {
-      console.log("Modifying existing search:", selectedFilter)
+  const savedSearches = useMemo(() => data?.data || [], [data])
+
+  const filteredSearches = savedSearches.filter((search) => search.name.toLowerCase().includes(searchQuery.toLowerCase()))
+  const selectedFilterName = savedSearches.find(s => s.id === selectedFilterId)?.name
+
+  const handleSave = async () => {
+    const filters = {
+      contact: contactFilters,
+      company: companyFilters
+    }
+
+    try {
+      if (searchMode === "new") {
+        await createFilter({
+          name: newSearchName,
+          filters,
+          entity_type: entityType,
+          description: ""
+        }).unwrap()
+        toast({ title: "Filter saved successfully" })
+      } else {
+        if (!selectedFilterId) return
+        await updateFilter({
+          id: selectedFilterId,
+          filters
+        }).unwrap()
+        toast({ title: "Filter updated successfully" })
+      }
+      onOpenChange(false)
+      setNewSearchName("")
+      setSelectedFilterId("")
+    } catch (err) {
+      console.error(err)
+      toast({ title: "Failed to save filter", variant: "destructive" })
     }
   }
 
-  const isSaveDisabled = searchMode === "new" ? newSearchName.trim() === "" : selectedFilter.trim() === ""
+  const isSaveDisabled = searchMode === "new" ? newSearchName.trim() === "" : selectedFilterId === ""
+  const isLoading = isCreating || isUpdating
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -67,9 +101,8 @@ const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
                   className="sr-only"
                 />
                 <div
-                  className={`size-4 rounded-full border-2 transition-all ${
-                    searchMode === "new" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
-                  }`}
+                  className={`size-4 rounded-full border-2 transition-all ${searchMode === "new" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
+                    }`}
                 >
                   {searchMode === "new" && <div className="absolute inset-0 m-[3px] rounded-full bg-white" />}
                 </div>
@@ -98,9 +131,8 @@ const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
                   className="sr-only"
                 />
                 <div
-                  className={`size-4 rounded-full border-2 transition-all ${
-                    searchMode === "modify" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
-                  }`}
+                  className={`size-4 rounded-full border-2 transition-all ${searchMode === "modify" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
+                    }`}
                 >
                   {searchMode === "modify" && <div className="absolute inset-0 m-[3px] rounded-full bg-white" />}
                 </div>
@@ -118,11 +150,10 @@ const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
                   role="combobox"
                   aria-expanded={isDropdownOpen}
                   disabled={searchMode !== "modify"}
-                  className={`w-full justify-between font-normal ${searchMode !== "modify" ? "bg-gray-50 opacity-60" : ""} ${
-                    !selectedFilter ? "text-muted-foreground" : ""
-                  }`}
+                  className={`w-full justify-between font-normal ${searchMode !== "modify" ? "bg-gray-50 opacity-60" : ""} ${!selectedFilterId ? "text-muted-foreground" : ""
+                    }`}
                 >
-                  {selectedFilter || "Select the saved filter to overwrite"}
+                  {selectedFilterName || "Select the saved filter to overwrite"}
                   <ChevronDown className={`ml-2 size-4 shrink-0 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
                 </Button>
               </DropdownMenuTrigger>
@@ -145,17 +176,17 @@ const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
                 {/* Search Results */}
                 <div className="max-h-48 overflow-y-auto p-2">
                   {filteredSearches.length > 0 ? (
-                    filteredSearches.map((search, index) => (
+                    filteredSearches.map((search) => (
                       <DropdownMenuItem
-                        key={index}
+                        key={search.id}
                         onClick={() => {
-                          setSelectedFilter(search)
+                          setSelectedFilterId(search.id)
                           setSearchQuery("")
                           setIsDropdownOpen(false)
                         }}
                         className="cursor-pointer text-sm font-normal text-gray-950"
                       >
-                        {search}
+                        {search.name}
                       </DropdownMenuItem>
                     ))
                   ) : (
@@ -176,9 +207,10 @@ const SaveFilter = ({ open, onOpenChange }: SaveFilterProps) => {
           <Button
             variant="outline"
             onClick={handleSave}
-            disabled={isSaveDisabled}
+            disabled={isSaveDisabled || isLoading}
             className="w-full rounded-lg p-2 text-sm font-medium text-[#5C5C5C]"
           >
+            {isLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
             Save
           </Button>
         </DialogFooter>

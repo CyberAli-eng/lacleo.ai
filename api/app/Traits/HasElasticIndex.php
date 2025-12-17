@@ -453,16 +453,18 @@ trait HasElasticIndex
         static::bootElasticModelTrait();
         $instance = new static;
         $config = $instance->getIndexConfiguration();
+        $indexOverride = $options['index'] ?? null;
+        $index = is_string($indexOverride) ? $indexOverride : $instance->getReadAlias();
         try {
             $response = static::$elasticClient->search(array_merge([
-                'index' => $config['name'],
+                'index' => $index,
                 'body' => $query,
             ], $options));
 
             return $response;
         } catch (\Throwable $e) {
             \Log::channel('elastic')->error('Elasticsearch search failed, returning empty results', [
-                'index' => $config['name'],
+                'index' => $index,
                 'error' => $e->getMessage(),
             ]);
 
