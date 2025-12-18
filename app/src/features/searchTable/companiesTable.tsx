@@ -58,9 +58,16 @@ export function CompaniesTable() {
     lastPage: 1
   })
 
-  // Local search input state - independent from Redux to prevent auto-search
-  // Redux searchQuery is used for AI-generated searches via semanticQuery
+  // Sync with global search query
+
+  // const globalSearchQuery = useAppSelector(selectSearchQuery)
   const [queryValue, setQueryValue] = useState("")
+
+  // Keep local state in sync with global (if updated elsewhere)
+  // selectSearchQuery :-> using this was the problem here
+  // useEffect(() => {
+  //   setQueryValue(globalSearchQuery)
+  // }, [globalSearchQuery])
 
   const debouncedQueryValue = useDebounce(queryValue, 500)
 
