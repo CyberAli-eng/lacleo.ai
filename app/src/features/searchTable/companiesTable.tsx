@@ -17,7 +17,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import DownloadIcon from "../../static/media/icons/download-icon.svg?react"
 import { selectSelectedItems, selectActiveFilters } from "../filters/slice/filterSlice"
-import { setLastResultCount, selectSemanticQuery, selectSearchQuery, startSearch } from "../aisearch/slice/searchslice"
+import { setLastResultCount, selectSemanticQuery, startSearch } from "../aisearch/slice/searchslice"
 import { DataTable } from "./baseDataTable"
 import { useSearchContactsQuery } from "./slice/apiSlice"
 import { useCompanyLogoQuery } from "./slice/apiSlice"
@@ -58,15 +58,9 @@ export function CompaniesTable() {
     lastPage: 1
   })
 
-  // Sync with global search query
-
-  const globalSearchQuery = useAppSelector(selectSearchQuery)
-  const [queryValue, setQueryValue] = useState(globalSearchQuery)
-
-  // Keep local state in sync with global (if updated elsewhere)
-  useEffect(() => {
-    setQueryValue(globalSearchQuery)
-  }, [globalSearchQuery])
+  // Local search input state - independent from Redux to prevent auto-search
+  // Redux searchQuery is used for AI-generated searches via semanticQuery
+  const [queryValue, setQueryValue] = useState("")
 
   const debouncedQueryValue = useDebounce(queryValue, 500)
 
