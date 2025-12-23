@@ -167,7 +167,7 @@ class SearchService
                 continue;
             }
             $direction = strtolower((string) ($s['direction'] ?? 'asc')) === 'desc' ? 'desc' : 'asc';
-            $numericFields = ['employee_count', 'annual_revenue_usd', 'founded_year', 'latest_funding_amount', 'total_funding_usd'];
+            $numericFields = ['employees', 'employee_count', 'annualRevenue', 'annual_revenue_usd', 'foundedYear', 'founded_year', 'latest_funding_amount', 'total_funding_usd'];
             if (in_array($field, $numericFields, true)) {
                 $builder->sort($field, $direction);
             } else {
@@ -195,23 +195,6 @@ class SearchService
         if (!empty($filters['company_headcount_contact'])) {
             $filters['company_headcount'] = $filters['company_headcount_contact'];
             unset($filters['company_headcount_contact']);
-        }
-
-        // Map frontend filter IDs to canonical backend names
-        // Industry filters can come as 'industry' or 'company_industries'
-        if (!empty($filters['company_industries']) && empty($filters['industries'])) {
-            $filters['industries'] = $filters['company_industries'];
-            unset($filters['company_industries']);
-        }
-
-        // Company Location filter can come as 'company_location' or 'company_headquarters'
-        if (!empty($filters['company_location']) && empty($filters['locations'])) {
-            $filters['locations'] = $filters['company_location'];
-            unset($filters['company_location']);
-        }
-        if (!empty($filters['company_headquarters']) && empty($filters['locations'])) {
-            $filters['locations'] = $filters['company_headquarters'];
-            unset($filters['company_headquarters']);
         }
 
         // --- Apollo-Style Cross-Index Filtering ---
@@ -280,24 +263,14 @@ class SearchService
             }
         }
 
-        // Process contact-specific filters vs company filters differently
-        $contactFilters = isset($filters['contact']) && is_array($filters['contact']) ? $filters['contact'] : [];
-        $companyFilters = isset($filters['company']) && is_array($filters['company']) ? $filters['company'] : [];
-
-        // For company searches, unwrap company bucket
-        if ($type === 'company') {
-            $filters = array_merge($filters, $companyFilters);
-            // Remove both buckets to avoid duplicate processing
-            unset($filters['contact']);
-            unset($filters['company']);
-        } else {
-            // For contact searches, keep both buckets separate for now
-            // We'll process company filters separately via resolveCompanyFiltersToDomains
-            // Remove company bucket from main $filters to avoid treating company.locations as contact.locations
-            unset($filters['company']);
-            // Also remove contact bucket for now - we'll process it separately
-            $filters = array_merge($filters, $contactFilters);
-            unset($filters['contact']);
+        // Process regular contact filters (excluding company filters)
+        // Unwrap 'contact' bucket if present, merging it into the top-level
+        if (isset($filters['contact']) && is_array($filters['contact'])) {
+            $filters = array_merge($filters, $filters['contact']);
+        }
+        // Unwrap 'company' bucket when searching the company index
+        if ($type === 'company' && isset($filters['company']) && is_array($filters['company'])) {
+            $filters = array_merge($filters, $filters['company']);
         }
 
         // Normalize legacy/frontend filter IDs to canonical keys
@@ -329,22 +302,24 @@ class SearchService
                     $shouldStart = [];
                     $shouldStart[] = ['exists' => ['field' => 'industry']];
                     $shouldStart[] = ['exists' => ['field' => 'industries']];
-                    $shouldStart[] = ['exists' => ['field' => 'business_category']];
+                    $shouldStart[] = ['exists' => ['field' => 'businessCategory']];
                     $filterClauses[] = ['bool' => ['should' => $shouldStart, 'minimum_should_match' => 1]];
                 } else {
                     $shouldStart = [];
                     $shouldStart[] = ['exists' => ['field' => 'company_obj.industry']];
                     $shouldStart[] = ['exists' => ['field' => 'company_obj.industries']];
+                    $shouldStart[] = ['exists' => ['field' => 'company_obj.businessCategory']];
                     $filterClauses[] = ['bool' => ['should' => $shouldStart, 'minimum_should_match' => 1]];
                 }
             } elseif ($presence === 'unknown') {
                 if ($type === 'company') {
                     $mustNot[] = ['exists' => ['field' => 'industry']];
                     $mustNot[] = ['exists' => ['field' => 'industries']];
-                    $mustNot[] = ['exists' => ['field' => 'business_category']];
+                    $mustNot[] = ['exists' => ['field' => 'businessCategory']];
                 } else {
                     $mustNot[] = ['exists' => ['field' => 'company_obj.industry']];
                     $mustNot[] = ['exists' => ['field' => 'company_obj.industries']];
+                    $mustNot[] = ['exists' => ['field' => 'company_obj.businessCategory']];
                 }
             }
 
@@ -354,12 +329,13 @@ class SearchService
                     $should = [];
                     $should[] = ['terms' => ['industry' => $include]];
                     $should[] = ['terms' => ['industries' => $include]];
-                    $should[] = ['terms' => ['business_category' => $include]];
+                    $should[] = ['terms' => ['businessCategory' => $include]];
                     $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
                 } else {
                     $should = [];
                     $should[] = ['terms' => ['company_obj.industry' => $include]];
                     $should[] = ['terms' => ['company_obj.industries' => $include]];
+                    $should[] = ['terms' => ['company_obj.businessCategory' => $include]];
                     $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
                 }
             }
@@ -370,12 +346,13 @@ class SearchService
                     $shouldExclude = [];
                     $shouldExclude[] = ['terms' => ['industry' => $exclude]];
                     $shouldExclude[] = ['terms' => ['industries' => $exclude]];
-                    $shouldExclude[] = ['terms' => ['business_category' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['businessCategory' => $exclude]];
                     $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
                 } else {
                     $shouldExclude = [];
                     $shouldExclude[] = ['terms' => ['company_obj.industry' => $exclude]];
                     $shouldExclude[] = ['terms' => ['company_obj.industries' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['company_obj.businessCategory' => $exclude]];
                     $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
                 }
             }
@@ -393,10 +370,10 @@ class SearchService
                 switch ($f) {
                     case 'name':
                         if ($type === 'company') {
-                            $targetFields[] = 'company_name^3';
+                            $targetFields[] = 'company^3';
                             $targetFields[] = 'company.keyword^3';
                         } else {
-                            $targetFields[] = 'company_obj.name^3'; // Assuming name is top level in company_obj
+                            $targetFields[] = 'company_obj.company^3';
                         }
                         break;
                     case 'keywords':
@@ -414,12 +391,12 @@ class SearchService
                         break;
                     case 'description':
                         if ($type === 'company') {
-                            $targetFields[] = 'short_description';
-                            $targetFields[] = 'description';
+                            $targetFields[] = 'seoDescription';
+                            $targetFields[] = 'businessDescription';
                             $targetFields[] = 'about';
                         } else {
-                            $targetFields[] = 'company_obj.short_description';
-                            $targetFields[] = 'company_obj.description';
+                            $targetFields[] = 'company_obj.seoDescription';
+                            $targetFields[] = 'company_obj.businessDescription';
                             $targetFields[] = 'company_obj.about';
                         }
                         break;
@@ -427,9 +404,9 @@ class SearchService
             }
             if (empty($targetFields)) {
                 if ($type === 'company') {
-                    $targetFields = ['short_description', 'description', 'industry', 'company_name'];
+                    $targetFields = ['seoDescription', 'businessDescription', 'industry', 'company'];
                 } else {
-                    $targetFields = ['company_obj.short_description', 'company_obj.description', 'company_obj.industry', 'company_obj.name'];
+                    $targetFields = ['company_obj.seoDescription', 'company_obj.businessDescription', 'company_obj.industry', 'company_obj.company'];
                 }
             }
 
@@ -470,64 +447,130 @@ class SearchService
             }
         }
 
-        // ... Locations block ...
-        // Company Location (Hierarchical: country, state, city)
-        // OR Contact Location (when searching contacts)
-        if (!empty($filters['locations']) && is_array($filters['locations'])) {
-            $locs = $filters['locations'];
-            $include = $locs['include'] ?? [];
-            $exclude = $locs['exclude'] ?? [];
+        // --- Locations block ---
+        // Support flexible contact/company location filters: include, exclude, known/unknown
+        if (!empty($filters['locations']) || !empty($filters['country']) || !empty($filters['state']) || !empty($filters['city'])) {
+            // Normalize buckets: allow either `locations: { include, exclude }` or top-level country/state/city keys
+            $locBucket = is_array($filters['locations']) ? $filters['locations'] : [];
+            $countryBucket = is_array($filters['country']) ? $filters['country'] : [];
+            $stateBucket = is_array($filters['state']) ? $filters['state'] : [];
+            $cityBucket = is_array($filters['city']) ? $filters['city'] : [];
 
-            // Normalize to array if single value
-            if (!is_array($include)) {
-                $include = [$include];
+            $incCountries = array_values(array_filter(array_map('trim', (array) ($locBucket['countries'] ?? $countryBucket['include'] ?? [])), 'strlen'));
+            $excCountries = array_values(array_filter(array_map('trim', (array) ($locBucket['countries_exclude'] ?? $countryBucket['exclude'] ?? [])), 'strlen'));
+
+            $incStates = array_values(array_filter(array_map('trim', (array) ($locBucket['states'] ?? $stateBucket['include'] ?? [])), 'strlen'));
+            $excStates = array_values(array_filter(array_map('trim', (array) ($locBucket['states_exclude'] ?? $stateBucket['exclude'] ?? [])), 'strlen'));
+
+            $incCities = array_values(array_filter(array_map('trim', (array) ($locBucket['cities'] ?? $cityBucket['include'] ?? [])), 'strlen'));
+            $excCities = array_values(array_filter(array_map('trim', (array) ($locBucket['cities_exclude'] ?? $cityBucket['exclude'] ?? [])), 'strlen'));
+
+            $presence = $locBucket['presence'] ?? ($filters['location_presence'] ?? ($filters['known'] ?? null));
+
+            // Normalizer - lowercase, remove punctuation
+            $normalize = function (string $v): string {
+                $s = mb_strtolower(trim($v));
+                $s = preg_replace('/[\p{P}\p{S}]+/u', ' ', $s);
+                $s = preg_replace('/\s+/u', ' ', $s);
+                return trim($s);
+            };
+
+            // Determine fields to match depending on type
+            if ($type === 'company') {
+                $countryFields = ['country', 'location.country'];
+                $stateFields = ['state', 'location.state'];
+                $cityFields = ['city', 'location.city'];
+            } else {
+                // contact: prefer person location, but include company_obj.* as fallback if searching contacts-by-company
+                $countryFields = ['location.country', 'country', 'company_obj.location.country', 'company_obj.country'];
+                $stateFields = ['location.state', 'state', 'company_obj.location.state', 'company_obj.state'];
+                $cityFields = ['location.city', 'city', 'company_obj.location.city', 'company_obj.city'];
             }
-            if (!is_array($exclude)) {
-                $exclude = [$exclude];
+
+            // Helper to build per-value clauses across multiple fields
+            $buildIncludeClauses = function (array $values, array $fields) use ($normalize) {
+                $should = [];
+                foreach ($values as $val) {
+                    $n = $normalize($val);
+                    if ($n === '')
+                        continue;
+                    foreach ($fields as $f) {
+                        // exact keyword term (if field has keyword mapping) and a phrase match fallback
+                        $should[] = ['term' => [$f => ['value' => $n]]];
+                        $should[] = ['match_phrase' => [$f => ['query' => $n]]];
+                    }
+                }
+                return $should;
+            };
+
+            $buildExcludeClauses = function (array $values, array $fields) use ($normalize) {
+                $clauses = [];
+                foreach ($values as $val) {
+                    $n = $normalize($val);
+                    if ($n === '')
+                        continue;
+                    foreach ($fields as $f) {
+                        $clauses[] = ['term' => [$f => ['value' => $n]]];
+                        $clauses[] = ['match_phrase' => [$f => ['query' => $n]]];
+                    }
+                }
+                return $clauses;
+            };
+
+            // Include countries/states/cities
+            if ($incCountries) {
+                $clauses = $buildIncludeClauses($incCountries, $countryFields);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
+            }
+            if ($incStates) {
+                $clauses = $buildIncludeClauses($incStates, $stateFields);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
+            }
+            if ($incCities) {
+                $clauses = $buildIncludeClauses($incCities, $cityFields);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
             }
 
-            $include = array_values(array_filter(array_map('trim', $include), 'strlen'));
-            $exclude = array_values(array_filter(array_map('trim', $exclude), 'strlen'));
+            // Exclude
+            if ($excCountries) {
+                $clauses = $buildExcludeClauses($excCountries, $countryFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
+            if ($excStates) {
+                $clauses = $buildExcludeClauses($excStates, $stateFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
+            if ($excCities) {
+                $clauses = $buildExcludeClauses($excCities, $cityFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
 
-            // For company index, search in location.country, location.state, location.city
-            // For contact index, search in location.country, location.state, location.city (contact's own location)
-            if ($include) {
-                if ($type === 'company') {
-                    $should = [];
-                    $should[] = ['terms' => ['location.country' => $include]];
-                    $should[] = ['terms' => ['location.state' => $include]];
-                    $should[] = ['terms' => ['location.city' => $include]];
-                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
-                } else {
-                    // Contact search: filter by contact's own location, not company location
-                    $should = [];
-                    $should[] = ['terms' => ['location.country' => $include]];
-                    $should[] = ['terms' => ['location.state' => $include]];
-                    $should[] = ['terms' => ['location.city' => $include]];
-                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+            // Presence handling
+            if ($presence === 'known' || $presence === true || $presence === 'true') {
+                // require at least one of the country/state/city fields to exist
+                $existsShould = [];
+                foreach (array_merge($countryFields, $stateFields, $cityFields) as $f) {
+                    $existsShould[] = ['exists' => ['field' => $f]];
+                }
+                if ($existsShould)
+                    $filterClauses[] = ['bool' => ['should' => $existsShould, 'minimum_should_match' => 1]];
+            } elseif ($presence === 'unknown' || $presence === false || $presence === 'false') {
+                // none of those fields should exist
+                foreach (array_merge($countryFields, $stateFields, $cityFields) as $f) {
+                    $mustNot[] = ['exists' => ['field' => $f]];
                 }
             }
 
-            // Exclude Logic
-            if ($exclude) {
-                if ($type === 'company') {
-                    $shouldExclude = [];
-                    $shouldExclude[] = ['terms' => ['location.country' => $exclude]];
-                    $shouldExclude[] = ['terms' => ['location.state' => $exclude]];
-                    $shouldExclude[] = ['terms' => ['location.city' => $exclude]];
-                    $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
-                } else {
-                    // Contact search: exclude by contact's own location
-                    $shouldExclude = [];
-                    $shouldExclude[] = ['terms' => ['location.country' => $exclude]];
-                    $shouldExclude[] = ['terms' => ['location.state' => $exclude]];
-                    $shouldExclude[] = ['terms' => ['location.city' => $exclude]];
-                    $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
-                }
-            }
+            // End locations block
         }
 
-        // Company Location (Single value - backward compatibility)
+        // Employee Count (Range)
         if (!empty($filters['employee_count']) && is_array($filters['employee_count'])) {
             $rng = $filters['employee_count'];
             $range = [];
@@ -539,45 +582,28 @@ class SearchService
             }
             if ($range) {
                 if ($type === 'company') {
-                    $filterClauses[] = ['range' => ['employee_count' => $range]];
+                    $filterClauses[] = ['range' => ['employees' => $range]];
                 } else {
-                    $filterClauses[] = ['range' => ['company_obj.employee_count' => $range]];
+                    $filterClauses[] = ['range' => ['company_obj.employees' => $range]];
                 }
             }
         }
 
         // Employee Count (Headcount Buckets)
         if (!empty($filters['company_headcount']) && is_array($filters['company_headcount'])) {
+            // ... Logic same as before but applying field logic
             $ch = $filters['company_headcount'];
-            
-            // Handle numeric range format: { min: 1, max: 50 }
-            if (isset($ch['min']) || isset($ch['max'])) {
-                $range = [];
-                if (isset($ch['min']) && $ch['min'] !== null) {
-                    $range['gte'] = (int) $ch['min'];
-                }
-                if (isset($ch['max']) && $ch['max'] !== null) {
-                    $range['lte'] = (int) $ch['max'];
-                }
-                if ($range) {
-                    $field = ($type === 'company') ? 'employee_count' : 'company_obj.employee_count';
-                    $filterClauses[] = ['range' => [$field => $range]];
-                }
-                // Early return since we've handled the range format
-                // Continue to next filter
-            } else {
-                // Handle bracket format: { include: ["1-10", "11-50"], exclude: [] }
-                $include = array_values(array_filter(array_map('trim', (array) ($ch['include'] ?? [])), 'strlen'));
-                $exclude = array_values(array_filter(array_map('trim', (array) ($ch['exclude'] ?? [])), 'strlen'));
+            $include = array_values(array_filter(array_map('trim', (array) ($ch['include'] ?? [])), 'strlen'));
+            $exclude = array_values(array_filter(array_map('trim', (array) ($ch['exclude'] ?? [])), 'strlen'));
 
-                $field = ($type === 'company') ? 'employee_count' : 'company_obj.employee_count';
+            $field = ($type === 'company') ? 'employees' : 'company_obj.employees';
 
-                // ... (Include logic)
-                if ($include) {
-                    $should = [];
-                    foreach ($include as $bracket) {
-                        // ... regex logic ...
-                        $min = null;
+            // ... (Include logic)
+            if ($include) {
+                $should = [];
+                foreach ($include as $bracket) {
+                    // ... regex logic ...
+                    $min = null;
                     $max = null;
                     if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
                         $min = (int) $m[1];
@@ -601,29 +627,28 @@ class SearchService
                     $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
             }
 
-                // ... (Exclude logic) - using $field variable
-                if ($exclude) {
-                    foreach ($exclude as $bracket) {
-                        // ... regex logic ...
-                        $min = null;
+            // ... (Exclude logic) - using $field variable
+            if ($exclude) {
+                foreach ($exclude as $bracket) {
+                    // ... regex logic ...
+                    $min = null;
+                    $max = null;
+                    if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
+                        $min = (int) $m[1];
+                        $max = (int) $m[2];
+                    } elseif (preg_match('/^(\d+)\+$/', $bracket, $m)) {
+                        $min = (int) $m[1];
                         $max = null;
-                        if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
-                            $min = (int) $m[1];
-                            $max = (int) $m[2];
-                        } elseif (preg_match('/^(\d+)\+$/', $bracket, $m)) {
-                            $min = (int) $m[1];
-                            $max = null;
-                        }
-
-                        $range = [];
-                        if ($min !== null)
-                            $range['gte'] = $min;
-                        if ($max !== null)
-                            $range['lte'] = $max;
-
-                        if (!empty($range))
-                            $mustNot[] = ['range' => [$field => $range]];
                     }
+
+                    $range = [];
+                    if ($min !== null)
+                        $range['gte'] = $min;
+                    if ($max !== null)
+                        $range['lte'] = $max;
+
+                    if (!empty($range))
+                        $mustNot[] = ['range' => [$field => $range]];
                 }
             }
         }
@@ -631,7 +656,7 @@ class SearchService
         // Revenue
         if (!empty($filters['revenue']) && is_array($filters['revenue'])) {
             $rev = $filters['revenue'];
-            $field = ($type === 'company') ? 'annual_revenue' : 'company_obj.annual_revenue_usd';
+            $field = ($type === 'company') ? 'annualRevenue' : 'company_obj.annualRevenue';
 
             // 1. Min/Max
             $range = [];
@@ -695,24 +720,56 @@ class SearchService
             }
         }
 
-        // Technologies (companies only)
+        // Technologies (Company stack - high precision)
         if (!empty($filters['technologies'])) {
             $tech = $filters['technologies'];
-            $include = array_values(array_filter(array_map('trim', (array) ($tech['include'] ?? [])), 'strlen'));
-            $exclude = array_values(array_filter(array_map('trim', (array) ($tech['exclude'] ?? [])), 'strlen'));
-            if ($type === 'company') {
-                if ($include) {
-                    $filterClauses[] = ['terms' => ['technologies' => $include]];
+            $includeRaw = array_values(array_filter(array_map('trim', (array) ($tech['include'] ?? [])), 'strlen'));
+            $excludeRaw = array_values(array_filter(array_map('trim', (array) ($tech['exclude'] ?? [])), 'strlen'));
+
+            $field = ($type === 'company') ? 'technologies_normalized' : 'company_obj.technologies_normalized';
+            $rawFields = ($type === 'company')
+                ? ['technologies', 'company_technologies', 'tech_stack']
+                : ['company_obj.technologies', 'company_obj.company_technologies', 'company_obj.tech_stack'];
+
+            if ($includeRaw) {
+                $includeNorm = RecordNormalizer::normalizeTechnologies($includeRaw);
+                $shouldTech = [];
+
+                // 1. Exact canonical matches (Keyword)
+                if ($includeNorm) {
+                    $shouldTech[] = ['terms' => [$field => $includeNorm]];
                 }
-                if ($exclude) {
-                    $mustNot[] = ['terms' => ['technologies' => $exclude]];
+
+                // 2. Phrase matches for compound/unmapped terms (Boosted)
+                foreach ($includeRaw as $t) {
+                    $shouldTech[] = [
+                        'multi_match' => [
+                            'query' => $t,
+                            'type' => 'phrase',
+                            'fields' => array_map(fn($f) => $f . '^2', $rawFields),
+                        ]
+                    ];
                 }
-            } else {
-                if ($include) {
-                    $filterClauses[] = ['terms' => ['company_obj.technologies' => $include]];
+
+                if ($shouldTech) {
+                    $filterClauses[] = ['bool' => ['should' => $shouldTech, 'minimum_should_match' => 1]];
                 }
-                if ($exclude) {
-                    $mustNot[] = ['terms' => ['company_obj.technologies' => $exclude]];
+            }
+
+            if ($excludeRaw) {
+                $excludeNorm = RecordNormalizer::normalizeTechnologies($excludeRaw);
+                if ($excludeNorm) {
+                    $mustNot[] = ['terms' => [$field => $excludeNorm]];
+                }
+
+                foreach ($excludeRaw as $t) {
+                    $mustNot[] = [
+                        'multi_match' => [
+                            'query' => $t,
+                            'type' => 'phrase',
+                            'fields' => $rawFields,
+                        ]
+                    ];
                 }
             }
         }
@@ -819,24 +876,58 @@ class SearchService
             if ($include) {
                 $shouldClauses = [];
                 foreach ($include as $term) {
-                    foreach ($this->expandAbbreviationSynonyms($term) as $t) {
-                        $shouldClauses[] = [
-                            'multi_match' => [
-                                'query' => $t,
-                                'type' => 'best_fields',
-                                'fields' => [
-                                    'job_title^3',
-                                    'title^2',
-                                    'normalized_title',
-                                    'title_keywords',
-                                    'title_synonyms',
-                                ],
-                                'operator' => 'and',
-                                'fuzziness' => 'AUTO',
-                                'prefix_length' => 1,
-                                'minimum_should_match' => strlen($t) <= 3 ? '100%' : '75%'
+                    $expandedTerms = $this->expandAbbreviationSynonyms($term);
+                    foreach ($expandedTerms as $t) {
+                        $termQuery = [
+                            'bool' => [
+                                'should' => [
+                                    // 1. Exact Phrase Match (Highest Precision)
+                                    [
+                                        'multi_match' => [
+                                            'query' => $t,
+                                            'type' => 'phrase',
+                                            'fields' => ['job_title^5', 'title^4', 'normalized_title^3'],
+                                            'boost' => 10
+                                        ],
+                                    ],
+                                    // 2. Keyword Match (Tokenized AND)
+                                    [
+                                        'multi_match' => [
+                                            'query' => $t,
+                                            'type' => 'cross_fields',
+                                            'fields' => ['job_title^3', 'title^2', 'normalized_title', 'title_keywords'],
+                                            'operator' => 'and',
+                                            'boost' => 5
+                                        ]
+                                    ]
+                                ]
                             ]
                         ];
+
+                        // 3. Fuzzy Match (Controlled - only for long words)
+                        $tokens = explode(' ', strtolower($t));
+                        $canFuzzy = false;
+                        foreach ($tokens as $token) {
+                            if (strlen($token) > 4) {
+                                $canFuzzy = true;
+                                break;
+                            }
+                        }
+
+                        if ($canFuzzy) {
+                            $termQuery['bool']['should'][] = [
+                                'multi_match' => [
+                                    'query' => $t,
+                                    'type' => 'best_fields',
+                                    'fields' => ['job_title', 'title', 'normalized_title'],
+                                    'fuzziness' => 1,
+                                    'prefix_length' => 2,
+                                    'boost' => 1
+                                ]
+                            ];
+                        }
+
+                        $shouldClauses[] = $termQuery;
                     }
                 }
                 if ($shouldClauses) {
@@ -849,11 +940,8 @@ class SearchService
                         $mustNot[] = [
                             'multi_match' => [
                                 'query' => $t,
-                                'type' => 'best_fields',
+                                'type' => 'phrase',
                                 'fields' => ['job_title', 'title', 'normalized_title', 'title_keywords', 'title_synonyms'],
-                                'operator' => 'and',
-                                'fuzziness' => 'AUTO',
-                                'prefix_length' => 1,
                             ]
                         ];
                     }
@@ -861,25 +949,41 @@ class SearchService
             }
         }
 
-        // Contact-specific: Department include/exclude with multi_match fuzzy search
+        // Contact-specific: Department include/exclude (synonym-aware, no fuzzy)
         if ($type === 'contact' && (!empty($filters['departments']) || !empty($filters['department']))) {
             $deptFilter = $filters['departments'] ?? $filters['department'];
             if (is_array($deptFilter)) {
                 $include = array_values(array_filter(array_map('trim', (array) ($deptFilter['include'] ?? [])), 'strlen'));
                 $exclude = array_values(array_filter(array_map('trim', (array) ($deptFilter['exclude'] ?? [])), 'strlen'));
 
+                $deptFields = ['department_normalized', 'departments', 'department', 'team', 'function'];
+
                 if ($include) {
                     $shouldClauses = [];
                     foreach ($include as $term) {
-                        foreach ($this->expandAbbreviationSynonyms($term) as $t) {
+                        foreach ($this->expandDepartmentSynonyms($term) as $t) {
                             $shouldClauses[] = [
-                                'multi_match' => [
-                                    'query' => $t,
-                                    'type' => 'best_fields',
-                                    'fields' => ['departments^2', 'department'],
-                                    'operator' => 'and',
-                                    'fuzziness' => 'AUTO',
-                                    'prefix_length' => 1,
+                                'bool' => [
+                                    'should' => [
+                                        // 1. Exact Phrase/Keyword Match
+                                        [
+                                            'multi_match' => [
+                                                'query' => $t,
+                                                'type' => 'phrase',
+                                                'fields' => array_map(fn($f) => "{$f}^2", $deptFields),
+                                                'boost' => 5
+                                            ]
+                                        ],
+                                        // 2. Tokenized AND Match (Secondary)
+                                        [
+                                            'multi_match' => [
+                                                'query' => $t,
+                                                'type' => 'cross_fields',
+                                                'fields' => $deptFields,
+                                                'operator' => 'and'
+                                            ]
+                                        ]
+                                    ]
                                 ]
                             ];
                         }
@@ -890,15 +994,12 @@ class SearchService
                 }
                 if ($exclude) {
                     foreach ($exclude as $term) {
-                        foreach ($this->expandAbbreviationSynonyms($term) as $t) {
+                        foreach ($this->expandDepartmentSynonyms($term) as $t) {
                             $mustNot[] = [
                                 'multi_match' => [
                                     'query' => $t,
-                                    'type' => 'best_fields',
-                                    'fields' => ['departments', 'department'],
-                                    'operator' => 'and',
-                                    'fuzziness' => 'AUTO',
-                                    'prefix_length' => 1,
+                                    'type' => 'phrase',
+                                    'fields' => $deptFields
                                 ]
                             ];
                         }
@@ -977,26 +1078,6 @@ class SearchService
                         ];
                     }
                 }
-            }
-        }
-
-        // Contact-specific: Years of Experience range filter
-        if ($type === 'contact' && !empty($filters['years_of_experience']) && is_array($filters['years_of_experience'])) {
-            $yoe = $filters['years_of_experience'];
-            $range = [];
-            
-            // Handle numeric range format: { min: 1, max: 10 }
-            if (isset($yoe['min']) || isset($yoe['max'])) {
-                if (isset($yoe['min']) && $yoe['min'] !== null) {
-                    $range['gte'] = (int) $yoe['min'];
-                }
-                if (isset($yoe['max']) && $yoe['max'] !== null) {
-                    $range['lte'] = (int) $yoe['max'];
-                }
-            }
-            
-            if (!empty($range)) {
-                $filterClauses[] = ['range' => ['years_of_experience' => $range]];
             }
         }
 
@@ -1764,10 +1845,17 @@ class SearchService
             'cmo' => ['cmo', 'chief marketing officer'],
             'cio' => ['cio', 'chief information officer'],
             'ceo' => ['ceo', 'chief executive officer'],
-            'hr' => ['hr', 'human resources'],
+            'vpo' => ['vp of operations', 'vice president of operations'],
+            'vps' => ['vp of sales', 'vice president of sales'],
+            'vpm' => ['vp of marketing', 'vice president of marketing'],
+            'vpe' => ['vp of engineering', 'vice president of engineering'],
+            'vp' => ['vp', 'vice president'],
+            'hr' => ['hr', 'human resources', 'human resources manager'],
             'it' => ['it', 'information technology'],
             'bd' => ['bd', 'business development'],
             'sde' => ['sde', 'software engineer', 'developer'],
+            'swe' => ['swe', 'software engineer', 'developer'],
+            'sre' => ['sre', 'site reliability engineer'],
         ];
         foreach ($syn as $abbr => $list) {
             if ($lower === $abbr) {
@@ -1777,6 +1865,34 @@ class SearchService
         return [$t];
     }
 
+    private function expandDepartmentSynonyms(string $term): array
+    {
+        $t = trim($term);
+        if ($t === '') {
+            return [];
+        }
+        $lower = strtolower($t);
+        $syns = [
+            'engineering' => ['engineering', 'eng', 'dev', 'development', 'software engineer', 'software development'],
+            'product' => ['product', 'product management', 'pm'],
+            'sales' => ['sales', 'business development', 'bd', 'account executive'],
+            'marketing' => ['marketing', 'growth', 'demand gen', 'performance marketing'],
+            'hr' => ['hr', 'human resources', 'people', 'people ops', 'talent'],
+            'finance' => ['finance', 'accounting', 'fp&a'],
+            'it' => ['it', 'information technology'],
+            'support' => ['support', 'customer support', 'helpdesk'],
+            'data' => ['data', 'analytics', 'business intelligence'],
+        ];
+
+        // Check if the input itself is a canonical name or shorthand
+        foreach ($syns as $canonical => $variants) {
+            if ($lower === $canonical || in_array($lower, $variants)) {
+                return $variants;
+            }
+        }
+
+        return [$t];
+    }
     protected function applySearchQuery(ElasticQueryBuilder $builder, string $modelType, array $searchConfig, ?string $query): void
     {
         if (empty($query = trim((string) $query))) {
@@ -2096,15 +2212,25 @@ class SearchService
 
         // Map contact DSL company filters to actual company index filters
         $filterMap = [
-            'company_employee_count' => 'employee_count',
-            'company_headcount' => 'employee_count',
-            'company_revenue' => 'annual_revenue',
+            'company_employee_count' => 'employees',
+            'company_headcount' => 'employees',
+            'employee_count' => 'employees',
+            'company_revenue' => 'annualRevenue',
+            'revenue' => 'annualRevenue',
+            'annual_revenue' => 'annualRevenue',
             'company_industries' => 'industries',
+            'industry' => 'industries',
+            'industries' => 'industries',
             'company_technologies' => 'technologies',
+            'technologies' => 'technologies',
             'company_locations' => 'locations',
-            'company_founded_year' => 'founded_year',
+            'company_location' => 'locations',
+            'company_headquarters' => 'locations',
+            'company_founded_year' => 'foundedYear',
+            'founded_year' => 'foundedYear',
             'company_domains' => 'domains',
-            'company_has' => 'has'
+            'company_has' => 'has',
+            'company_keywords' => 'company_keywords'
         ];
 
         // Apply each company filter
@@ -2112,7 +2238,7 @@ class SearchService
             $actualKey = $filterMap[$key] ?? $key;
 
             switch ($actualKey) {
-                case 'employee_count':
+                case 'employees':
                     if (is_array($value)) {
                         $range = [];
                         if (isset($value['min']) && $value['min'] !== null) {
@@ -2122,7 +2248,7 @@ class SearchService
                             $range['lte'] = (int) $value['max'];
                         }
                         if ($range) {
-                            $filterClauses[] = ['range' => ['employee_count' => $range]];
+                            $filterClauses[] = ['range' => ['employees' => $range]];
                         }
 
                         // Handle include/exclude format
@@ -2146,7 +2272,7 @@ class SearchService
                                 if ($max !== null)
                                     $range['lte'] = $max;
                                 if ($range) {
-                                    $should[] = ['range' => ['employee_count' => $range]];
+                                    $should[] = ['range' => ['employees' => $range]];
                                 }
                             }
                             if ($should) {
@@ -2156,7 +2282,7 @@ class SearchService
                     }
                     break;
 
-                case 'annual_revenue':
+                case 'annualRevenue':
                     if (is_array($value)) {
                         $range = [];
                         if (isset($value['min']) && $value['min'] !== null) {
@@ -2166,7 +2292,56 @@ class SearchService
                             $range['lte'] = (float) $value['max'];
                         }
                         if ($range) {
-                            $filterClauses[] = ['range' => ['annual_revenue' => $range]];
+                            $filterClauses[] = ['range' => ['annualRevenue' => $range]];
+                        }
+
+                        // Handle include/exclude buckets
+                        $include = array_values(array_filter(array_map('trim', (array) ($value['include'] ?? [])), 'strlen'));
+                        if ($include) {
+                            $parseMoney = function ($val) {
+                                $val = strtoupper(str_replace(['$', ',', ' '], '', $val));
+                                $mult = 1;
+                                if (str_ends_with($val, 'M')) {
+                                    $mult = 1000000;
+                                    $val = substr($val, 0, -1);
+                                } elseif (str_ends_with($val, 'B')) {
+                                    $mult = 1000000000;
+                                    $val = substr($val, 0, -1);
+                                } elseif (str_ends_with($val, 'K')) {
+                                    $mult = 1000;
+                                    $val = substr($val, 0, -1);
+                                }
+                                return is_numeric($val) ? ((float) $val) * $mult : null;
+                            };
+
+                            $should = [];
+                            foreach ($include as $bucket) {
+                                $min = null;
+                                $max = null;
+                                if (str_contains($bucket, '+')) {
+                                    $parts = explode('+', $bucket);
+                                    $min = $parseMoney($parts[0]);
+                                } elseif (str_contains($bucket, '-')) {
+                                    $parts = explode('-', $bucket);
+                                    $min = $parseMoney($parts[0]);
+                                    $max = $parseMoney($parts[1] ?? '');
+                                } else {
+                                    $min = $parseMoney($bucket);
+                                    $max = $min;
+                                }
+
+                                $r = [];
+                                if ($min !== null)
+                                    $r['gte'] = $min;
+                                if ($max !== null)
+                                    $r['lte'] = $max;
+                                if ($r) {
+                                    $should[] = ['range' => ['annualRevenue' => $r]];
+                                }
+                            }
+                            if ($should) {
+                                $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                            }
                         }
                     }
                     break;
@@ -2180,14 +2355,14 @@ class SearchService
                             $should = [];
                             $should[] = ['terms' => ['industry' => $include]];
                             $should[] = ['terms' => ['industries' => $include]];
-                            $should[] = ['terms' => ['business_category' => $include]];
+                            $should[] = ['terms' => ['businessCategory' => $include]];
                             $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
                         }
                         if (!empty($exclude)) {
                             $should = [];
                             $should[] = ['terms' => ['industry' => $exclude]];
                             $should[] = ['terms' => ['industries' => $exclude]];
-                            $should[] = ['terms' => ['business_category' => $exclude]];
+                            $should[] = ['terms' => ['businessCategory' => $exclude]];
                             $mustNot[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
                         }
                     }
@@ -2195,14 +2370,44 @@ class SearchService
 
                 case 'technologies':
                     if (is_array($value)) {
-                        $include = $value['include'] ?? [];
-                        $exclude = $value['exclude'] ?? [];
+                        $includeRaw = $value['include'] ?? [];
+                        $excludeRaw = $value['exclude'] ?? [];
 
-                        if (!empty($include)) {
-                            $filterClauses[] = ['terms' => ['technologies' => $include]];
+                        if (!empty($includeRaw)) {
+                            $includeNorm = RecordNormalizer::normalizeTechnologies($includeRaw);
+                            $shouldTech = [];
+                            if ($includeNorm) {
+                                $shouldTech[] = ['terms' => ['technologies_normalized' => $includeNorm]];
+                            }
+                            $rawFields = ['technologies', 'company_technologies', 'tech_stack'];
+                            foreach ($includeRaw as $t) {
+                                $shouldTech[] = [
+                                    'multi_match' => [
+                                        'query' => $t,
+                                        'type' => 'phrase',
+                                        'fields' => array_map(fn($f) => $f . '^2', $rawFields)
+                                    ]
+                                ];
+                            }
+                            if ($shouldTech) {
+                                $filterClauses[] = ['bool' => ['should' => $shouldTech, 'minimum_should_match' => 1]];
+                            }
                         }
-                        if (!empty($exclude)) {
-                            $mustNot[] = ['terms' => ['technologies' => $exclude]];
+                        if (!empty($excludeRaw)) {
+                            $excludeNorm = RecordNormalizer::normalizeTechnologies($excludeRaw);
+                            if ($excludeNorm) {
+                                $mustNot[] = ['terms' => ['technologies_normalized' => $excludeNorm]];
+                            }
+                            $rawFields = ['technologies', 'company_technologies', 'tech_stack'];
+                            foreach ($excludeRaw as $t) {
+                                $mustNot[] = [
+                                    'multi_match' => [
+                                        'query' => $t,
+                                        'type' => 'phrase',
+                                        'fields' => $rawFields
+                                    ]
+                                ];
+                            }
                         }
                     }
                     break;
@@ -2222,7 +2427,7 @@ class SearchService
                                 $shouldLoc[] = [
                                     'multi_match' => [
                                         'query' => $country,
-                                        'fields' => ['location.country', 'city', 'state', 'country'],
+                                        'fields' => ['location.country', 'location.city', 'location.state', 'country', 'city', 'state'],
                                         'type' => 'phrase',
                                         'operator' => 'or'
                                     ]
@@ -2235,7 +2440,7 @@ class SearchService
                     }
                     break;
 
-                case 'founded_year':
+                case 'foundedYear':
                     if (is_array($value)) {
                         $range = [];
                         if (isset($value['min']) && $value['min'] !== null) {
@@ -2245,7 +2450,7 @@ class SearchService
                             $range['lte'] = (int) $value['max'];
                         }
                         if ($range) {
-                            $filterClauses[] = ['range' => ['founded_year' => $range]];
+                            $filterClauses[] = ['range' => ['foundedYear' => $range]];
                         }
                     }
                     break;
@@ -2262,7 +2467,7 @@ class SearchService
                                     'multi_match' => [
                                         'query' => $keyword,
                                         'type' => 'phrase',
-                                        'fields' => ['industry^3', 'technologies^3', 'keywords^2', 'short_description', 'description'],
+                                        'fields' => ['industry^3', 'industries^3', 'technologies^3', 'keywords^2', 'seoDescription', 'businessDescription'],
                                     ]
                                 ];
                             }
@@ -2275,7 +2480,7 @@ class SearchService
                                     'multi_match' => [
                                         'query' => $keyword,
                                         'type' => 'phrase',
-                                        'fields' => ['industry', 'technologies', 'keywords', 'short_description', 'description'],
+                                        'fields' => ['industry', 'industries', 'technologies', 'keywords', 'seoDescription', 'businessDescription'],
                                     ]
                                 ];
                             }

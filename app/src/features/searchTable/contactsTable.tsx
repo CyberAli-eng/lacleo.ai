@@ -22,7 +22,7 @@ import { Eye, Mail, Phone, User2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import DownloadIcon from "../../static/media/icons/download-icon.svg?react"
 import { selectSelectedItems, selectActiveFilters } from "../filters/slice/filterSlice"
-import { setLastResultCount, selectSemanticQuery,  startSearch } from "../aisearch/slice/searchslice"
+import { setLastResultCount, selectSemanticQuery, startSearch } from "../aisearch/slice/searchslice"
 import { DataTable } from "./baseDataTable"
 import { useSearchContactsQuery, useCompanyLogoQuery } from "./slice/apiSlice"
 import { CompanyAttributes } from "@/interface/searchTable/search"
@@ -50,54 +50,12 @@ const ContactCompanyCell = ({ row }: { row: ContactAttributes }) => {
 }
 
 // Component to calculate and display phone count (including company phone)
-const PhoneCountCell = ({ contact, isSelected }: { contact: ContactAttributes; isSelected: boolean }) => {
-  // Normalize emails to work + personal variables
-  const rawEmails = Array.isArray(contact.emails) ? contact.emails : []
-
-  // First, try to classify explicitly by type/category
-  let workEmailEntry = rawEmails.find(
-    (e) => typeof e === "object" && (e?.type === "work" || e?.category === "work")
-  )
-  let personalEmailEntry = rawEmails.find(
-    (e) => typeof e === "object" && (e?.type === "personal" || e?.category === "personal")
-  )
-
-  // Fallback: if no explicit types, treat first as work and second as personal (if present)
-  if (!workEmailEntry && rawEmails[0]) {
-    workEmailEntry = rawEmails[0]
-  }
-  if (!personalEmailEntry && rawEmails[1]) {
-    personalEmailEntry = rawEmails[1]
-  }
-
-  const workEmail =
-    typeof workEmailEntry === "string"
-      ? workEmailEntry
-      : workEmailEntry?.email || workEmailEntry?.address || null
-
-  const personalEmail =
-    typeof personalEmailEntry === "string"
-      ? personalEmailEntry
-      : personalEmailEntry?.email || personalEmailEntry?.address || null
-
-  // Normalize phones: prefer rich phone objects (phones or phone_numbers array of objects)
-  const rawPhones =
-    (Array.isArray(contact.phones) && contact.phones.length > 0
-      ? contact.phones
-      : (Array.isArray((contact as any).phone_numbers) && (contact as any).phone_numbers.length > 0
-          ? (contact as any).phone_numbers
-          : [])) as Array<string | { phone_number?: string; number?: string }>
-
-  const primaryPhoneEntry = rawPhones[0]
-  const primaryPhone =
-    typeof primaryPhoneEntry === "string"
-      ? primaryPhoneEntry
-      : primaryPhoneEntry?.phone_number || primaryPhoneEntry?.number || null
-
+const PhoneCountCell = ({ contact }: { contact: ContactAttributes }) => {
   // Count contact's own phones
   let phoneCount = 0
-  if (rawPhones.length > 0) {
-    phoneCount += rawPhones.length
+
+  if (Array.isArray(contact.phone_numbers) && contact.phone_numbers.length > 0) {
+    phoneCount += contact.phone_numbers.length
   } else if (contact.phone_number) {
     phoneCount += 1
   } else if ((contact as any)?.has_contact_phone === true) {
@@ -109,25 +67,18 @@ const PhoneCountCell = ({ contact, isSelected }: { contact: ContactAttributes; i
     .replace(/^https?:\/\//, "")
     .replace(/^www\./, "")
     .trim()
-  const companySearchUrl = buildSearchUrl(
-    { page: 1, count: 1 },
-    { searchTerm: normalizedDomain || contact.company || "" }
-  )
+  const companySearchUrl = buildSearchUrl({ page: 1, count: 1 }, { searchTerm: normalizedDomain || contact.company || "" })
   const { data: companySearchData } = useSearchContactsQuery(
     { type: "company", buildParams: companySearchUrl },
     { skip: !normalizedDomain && !contact.company }
   )
 
   const resolvedCompany: CompanyAttributes | null =
-    ((companySearchData as { data?: Array<{ attributes: CompanyAttributes }> } | undefined)
-      ?.data?.[0]?.attributes as CompanyAttributes | undefined) || null
+    ((companySearchData as { data?: Array<{ attributes: CompanyAttributes }> } | undefined)?.data?.[0]?.attributes as
+      | CompanyAttributes
+      | undefined) || null
 
   const companyPhone = resolvedCompany?.company_phone || resolvedCompany?.phone_number || null
-
-  // Debug: log ONLY for selected contacts:
-  // work/personal emails, primary phone, and resolved company phone
-
-
   if (companyPhone) {
     phoneCount += 1
   }
@@ -170,9 +121,6 @@ export function ContactsTable() {
   // NEW: State for checkbox selection
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
 
-
-
-
   const handlePageChange = (newPage: number) => {
     setPagination((prev) => ({
       ...prev,
@@ -199,11 +147,6 @@ export function ContactsTable() {
   const semanticQuery = useAppSelector(selectSemanticQuery)
   const filterDsl = useMemo(() => buildSearchQuery(selectedFilters, activeFilters), [selectedFilters, activeFilters])
 
-  useEffect(() => {
-    console.log("[ContactsTable] Built filterDsl:", JSON.stringify(filterDsl, null, 2))
-    console.log("[ContactsTable] selectedFilters:", selectedFilters)
-  }, [filterDsl, selectedFilters])
-
   const queryParams = useMemo(
     () => ({
       // Only include search term if it is valid (>= 2 chars) to avoid 422 errors
@@ -228,67 +171,6 @@ export function ContactsTable() {
   const { data, isLoading, isFetching } = useSearchContactsQuery({ type: "contact", buildParams: searchUrl }, { refetchOnMountOrArgChange: true })
 
   const sortableFields = ["full_name", "website", "title", "linkedin_url", "company"]
-
-  // Build exportable details for selected contacts
-  const selectedContactsDetails = useMemo(
-    () =>
-      ((data as SearchApiResponse<ContactAttributes>)?.data || [])
-        .filter((item) => selectedContacts.includes(item.id || ""))
-        .map((item) => {
-          const attrs = item.attributes
-
-          // Normalize emails similarly to PhoneCountCell
-          const rawEmails = Array.isArray(attrs.emails) ? attrs.emails : []
-
-          let workEmailEntry = rawEmails.find(
-            (e) => typeof e === "object" && (e?.type === "work" || e?.category === "work")
-          )
-          let personalEmailEntry = rawEmails.find(
-            (e) => typeof e === "object" && (e?.type === "personal" || e?.category === "personal")
-          )
-
-          if (!workEmailEntry && rawEmails[0]) {
-            workEmailEntry = rawEmails[0]
-          }
-          if (!personalEmailEntry && rawEmails[1]) {
-            personalEmailEntry = rawEmails[1]
-          }
-
-          const workEmail =
-            typeof workEmailEntry === "string"
-              ? workEmailEntry
-              : workEmailEntry?.email || workEmailEntry?.address || null
-
-          const personalEmail =
-            typeof personalEmailEntry === "string"
-              ? personalEmailEntry
-              : personalEmailEntry?.email || personalEmailEntry?.address || null
-
-          // Normalize phones from phones/phone_numbers
-          const rawPhones =
-            (Array.isArray(attrs.phones) && attrs.phones.length > 0
-              ? attrs.phones
-              : (Array.isArray((attrs as any).phone_numbers) && (attrs as any).phone_numbers.length > 0
-                  ? (attrs as any).phone_numbers
-                  : [])) as Array<string | { phone_number?: string; number?: string }>
-
-          const primaryPhoneEntry = rawPhones[0]
-          const primaryPhone =
-            typeof primaryPhoneEntry === "string"
-              ? primaryPhoneEntry
-              : primaryPhoneEntry?.phone_number || primaryPhoneEntry?.number || null
-
-          return {
-            id: item.id,
-            company: attrs.company || "",
-            workEmail,
-            personalEmail,
-            primaryPhone,
-            companyPhone: null
-          }
-        }),
-    [data, selectedContacts]
-  )
 
   // Enhanced columns with better styling and icons
   const baseColumns: DataTableColumn<ContactAttributes>[] = [
@@ -440,8 +322,7 @@ export function ContactsTable() {
         // const phoneCount = row.phone_number ? 1 : 0
         // const emailCount = row.email ? 1 : 0
         const emailCount = Array.isArray(row.emails) ? row.emails.length : 0
-    
-        
+
         return (
           <HoverCard
             className=""
@@ -451,7 +332,7 @@ export function ContactsTable() {
                 <Button className="rounded-lg border bg-transparent px-1.5 py-1 hover:bg-transparent">
                   <Phone className="size-3 text-[#5C5C5C]" />
                   <span className="rounded-full bg-[#EBEBEB] px-2 py-0.5 text-[11px] font-medium  text-gray-950">
-                    <PhoneCountCell contact={row} isSelected={selectedContacts.includes(row._id)} />
+                    <PhoneCountCell contact={row} />
                   </span>
                 </Button>
                 <Button className="rounded-lg border bg-transparent px-1.5 py-1 hover:bg-transparent">
@@ -480,7 +361,7 @@ export function ContactsTable() {
                 Reveal info
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Reveal contact (Phone: 4 credits, Email: free)</TooltipContent>
+            <TooltipContent>Reveal contact (Email: 1, Phone: 4 credits)</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )
