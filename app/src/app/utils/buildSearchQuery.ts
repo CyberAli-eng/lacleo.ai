@@ -19,14 +19,20 @@ interface ExperienceFilter {
 }
 
 const mapIdToDslKey: Record<string, string> = {
-  // Contact filters
-  industry: "industries",
-  company_location: "locations",
+  // Actual API filter IDs (from /filters endpoint)
+  industry: "industry",
+  company_location: "company_location",
+  company_headcount: "company_headcount",
+  
+  // Legacy/alternate mappings (for backward compat if needed)
   contact_location: "locations",
+  company_location_company: "locations",
+  company_headquarters: "locations",
   technologies: "technologies",
   employee_count: "employee_count",
-  company_headcount: "company_headcount",
+  company_employee_count: "employee_count",
   company_revenue: "revenue",
+  company_revenue_range: "revenue",
   job_title: "job_title",
   departments: "departments",
   years_of_experience: "years_of_experience",
@@ -35,17 +41,12 @@ const mapIdToDslKey: Record<string, string> = {
   company_domain_contact: "domains",
   company_name_company: "company_names",
   company_name_contact: "company_names",
-  // New company filters for contact search
-  company_employee_count: "employee_count",
-  company_revenue_range: "revenue",
-  company_industries: "industries",
-  company_technologies: "technologies",
-  company_headquarters: "locations",
+  company_industries: "industry",
+  company_headcount_contact: "company_headcount",
   company_founded_year: "founded_year",
   company_domain: "domains",
   company_has_email: "has",
   company_has_phone: "has",
-  // Contact-specific filters
   contact_experience_years: "experience_years",
   contact_has_email: "has",
   contact_has_phone: "has",
@@ -56,9 +57,13 @@ const mapIdToDslKey: Record<string, string> = {
 }
 
 const companyBucketKeys = new Set([
+  // Actual API keys
+  "industry",
+  "company_location",
+  "company_headcount",
+  // Legacy keys
   "revenue",
   "employee_count",
-  "company_headcount",
   "industries",
   "technologies",
   "domains",
@@ -70,8 +75,13 @@ const companyBucketKeys = new Set([
 
 // Special handling for numeric range filters
 const rangeFilterKeys = new Set([
+  // Actual API filter IDs that are ranges
+  "company_headcount",
+  
+  // Legacy/alternate IDs
   "employee_count",
   "company_employee_count",
+  "company_headcount_contact",
   "revenue",
   "company_revenue_range",
   "years_of_experience",
@@ -100,50 +110,61 @@ function buildIncludeExclude(items: SelectedFilter[]): IncludeExclude | null {
 }
 
 function buildRangeFilter(items: SelectedFilter[]): RangeFilter | null {
-  const ranges: RangeFilter = {}
+  let aggMin: number | undefined
+  let aggMax: number | undefined
+
+  const applyRange = (min?: number, max?: number) => {
+    if (typeof min === "number" && !isNaN(min)) aggMin = aggMin === undefined ? min : Math.min(aggMin, min)
+    if (typeof max === "number" && !isNaN(max)) aggMax = aggMax === undefined ? max : Math.max(aggMax, max)
+    // If only a single numeric value provided, treat as exact (min=max)
+    if (min !== undefined && max === undefined) aggMax = aggMax === undefined ? min : Math.max(aggMax, min)
+    if (max !== undefined && min === undefined) aggMin = aggMin === undefined ? max : Math.min(aggMin, max)
+  }
 
   items.forEach((item) => {
-    if (item.type === "include") {
-      // Handle different range formats
-      if (typeof item.value === "object" && item.value !== null) {
-        if ("min" in item.value) ranges.min = Number(item.value.min)
-        if ("max" in item.value) ranges.max = Number(item.value.max)
-      } else if (typeof item.value === "string") {
-        // Parse string ranges like "500-1000", "1000+", ">500"
-        const str = item.value
+    if (item.type !== "include") return
 
-        if (str.includes("+")) {
-          const min = parseFloat(str.replace("+", ""))
-          if (!isNaN(min)) ranges.min = min
-        } else if (str.includes("-")) {
-          const [minStr, maxStr] = str.split("-")
-          const min = parseFloat(minStr)
-          const max = parseFloat(maxStr)
-          if (!isNaN(min)) ranges.min = min
-          if (!isNaN(max)) ranges.max = max
-        } else if (str.startsWith(">")) {
-          const min = parseFloat(str.slice(1))
-          if (!isNaN(min)) ranges.min = min
-        } else if (str.startsWith("<")) {
-          const max = parseFloat(str.slice(1))
-          if (!isNaN(max)) ranges.max = max
-        } else {
-          // Try to parse as number
-          const num = parseFloat(str)
-          if (!isNaN(num)) {
-            ranges.min = num
-            ranges.max = num
-          }
-        }
-      } else if (typeof item.value === "number") {
-        ranges.min = item.value
-        ranges.max = item.value
-      }
+    if (typeof item.value === "object" && item.value !== null) {
+      const min = "min" in item.value ? Number((item.value as Record<string, unknown>).min) : undefined
+      const max = "max" in item.value ? Number((item.value as Record<string, unknown>).max) : undefined
+      applyRange(min, max)
+      return
+    }
+
+    if (typeof item.value === "number") {
+      applyRange(item.value, item.value)
+      return
+    }
+
+    const raw = (typeof item.value === "string" && item.value) ? item.value : (typeof item.name === "string" ? item.name : "")
+    if (!raw) return
+    const str = String(raw)
+
+    if (str.includes("+")) {
+      const min = parseFloat(str.replace("+", ""))
+      applyRange(isNaN(min) ? undefined : min, undefined)
+    } else if (str.includes("-")) {
+      const [minStr, maxStr] = str.split("-")
+      const min = parseFloat(minStr)
+      const max = parseFloat(maxStr)
+      applyRange(isNaN(min) ? undefined : min, isNaN(max) ? undefined : max)
+    } else if (str.startsWith(">")) {
+      const min = parseFloat(str.slice(1))
+      applyRange(isNaN(min) ? undefined : min, undefined)
+    } else if (str.startsWith("<")) {
+      const max = parseFloat(str.slice(1))
+      applyRange(undefined, isNaN(max) ? undefined : max)
+    } else {
+      const num = parseFloat(str)
+      if (!isNaN(num)) applyRange(num, num)
     }
   })
 
-  if (Object.keys(ranges).length === 0) return null
-  return ranges
+  if (aggMin === undefined && aggMax === undefined) return null
+  const out: RangeFilter = {}
+  if (aggMin !== undefined) out.min = aggMin
+  if (aggMax !== undefined) out.max = aggMax
+  return out
 }
 
 function buildBooleanFilter(items: SelectedFilter[]): boolean | null {
@@ -240,28 +261,28 @@ export function buildSearchQuery(
 
     // Special handling for different filter types
 
-    // 1. Range filters (employee count, revenue, years of experience)
+    // 1. Range filters (employee count, headcount, revenue, years of experience)
     if (rangeFilterKeys.has(sectionId)) {
       let filterValue: FilterValue | null = null
 
       if (sectionId.includes("revenue")) {
         filterValue = buildRevenueFilter(items)
-      } else if (sectionId.includes("experience")) {
+      } else if (sectionId.includes("experience") && !sectionId.includes("years_of")) {
+        // Use buildExperienceFilter only for non-years_of_experience experience filters
         filterValue = buildExperienceFilter(items)
       } else {
+        // Use buildRangeFilter for numeric ranges like years_of_experience, employee_count, etc.
         filterValue = buildRangeFilter(items)
       }
 
       if (!filterValue) return
 
-      // Determine where to place the filter
-      if (sectionId.startsWith("company_")) {
-        const companyKey = sectionId.replace("company_", "")
-        dsl.company[companyKey] = filterValue
-      } else if (companyBucketKeys.has(paramKey)) {
-        dsl.company[paramKey] = filterValue
+      // Determine where to place the filter using mapped key
+      const key = paramKey
+      if (companyBucketKeys.has(key)) {
+        dsl.company[key] = filterValue
       } else {
-        dsl.contact[paramKey] = filterValue
+        dsl.contact[key] = filterValue
       }
       return
     }
@@ -314,20 +335,9 @@ export function buildSearchQuery(
     const filterObj = buildIncludeExclude(items)
     if (!filterObj) return
 
-    // Determine bucket based on section ID
-    if (sectionId.startsWith("company_")) {
-      // Company filters for contact search
-      const companyKey = sectionId.replace("company_", "")
-      // Pass operator when available for domains/company_names
-      if (companyKey === "domain" || companyKey === "domains" || companyKey === "company_name" || companyKey === "company_names") {
-        const opKey = companyKey === "domains" || companyKey === "domain" ? "domains" : "company_names"
-        const bucket = activeFilters?.company?.[opKey]
-        dsl.company[opKey] = bucket?.operator ? { ...filterObj, operator: bucket.operator } : filterObj
-      } else {
-        dsl.company[companyKey] = filterObj
-      }
-    } else if (companyBucketKeys.has(paramKey)) {
-      // Include operator for domains/company_names if available
+    // Determine bucket based on mapped parameter key
+    if (companyBucketKeys.has(paramKey)) {
+      // Company filters - include operator for domains/company_names if available
       if (paramKey === "domains" || paramKey === "company_names") {
         const bucket = activeFilters?.company?.[paramKey]
         dsl.company[paramKey] = bucket?.operator ? { ...filterObj, operator: bucket.operator } : filterObj

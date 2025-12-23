@@ -141,7 +141,18 @@ const contactsApi = enhancedApi.injectEndpoints({
           url: "/billing/export",
           method: "POST",
           body: { type, ids, fields, limit, sanitize },
-          headers: { request_id: requestId ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`) }
+          headers: {
+            request_id: requestId ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`),
+            Accept: "application/json, text/csv;q=0.9, */*;q=0.8"
+          },
+          // Handle both JSON (metadata with URL) and raw CSV responses
+          responseHandler: async (response) => {
+            const contentType = response.headers.get("Content-Type") || ""
+            if (contentType.includes("application/json")) {
+              return response.json()
+            }
+            return response.text()
+          }
         }),
         invalidatesTags: ["BillingUsage", "User"]
       }),

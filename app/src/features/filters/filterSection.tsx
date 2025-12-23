@@ -94,6 +94,27 @@ export const Filters = () => {
     }
   }, [selectedItems, personalSectionId])
 
+  // Sync Local YOE State to Redux (Two-way: Local -> Redux on change)
+  const handleYoeRangeChange = (newRange: [number, number]) => {
+    console.log("[YOE] Range changed:", newRange)
+    setYoeRange(newRange)
+    // Remove old filter
+    const oldFilter = selectedItems[personalSectionId]?.[0]
+    if (oldFilter) {
+      console.log("[YOE] Removing old filter:", oldFilter.id)
+      dispatch(removeSelectedItem({ sectionId: personalSectionId, itemId: oldFilter.id }))
+    }
+    // Add new filter
+    const newFilterId = `${newRange[0]}-${newRange[1]}`
+    console.log("[YOE] Adding new filter:", newFilterId)
+    dispatch(
+      addSelectedItem({
+        sectionId: personalSectionId,
+        item: { id: newFilterId, name: newFilterId, type: "include" }
+      })
+    )
+  }
+
   const handleSearchChange = async (filter: IFilter, term: string) => {
     dispatch(setSearchTerm({ sectionId: filter.id, term }))
     if (term) {
@@ -291,7 +312,12 @@ export const Filters = () => {
             <Card className="overflow-hidden rounded-lg border bg-transparent shadow-none dark:bg-transparent">
               {group.filters
                 .filter((filter) => (isPeoplePage ? ["contact", "company"].includes(filter.filter_type) : filter.filter_type === "company"))
-                .map((filter) => (
+                .map((filter) => {
+                  // Debug: log filter IDs 
+                  if (["employee_count", "company_headcount", "company_headcount_contact", "industry", "company_industries", "company_location"].includes(filter.id)) {
+                    console.log(`📍 Filter ID: "${filter.id}", Name: "${filter.name}", Input Type: "${filter.input_type}"`)
+                  }
+                  return (
                   <div key={filter.id}>
                     <div
                       className={`border-b border-gray-100 dark:border-gray-800/50 ${expandedSections[filter.id] ? "bg-[#F7F7F7] dark:bg-gray-800/80" : "bg-white dark:bg-transparent"
@@ -301,41 +327,66 @@ export const Filters = () => {
                       {!!expandedSections[filter.id] && (
                         <div className="space-y-3 p-4">
                           {/* Custom Components Rendering */}
-                          {["industry", "company_industries"].includes(filter.id) ? (
-                            <IndustryFilter />
-                          ) : (
-                            <>
-                              {["company_domain_company", "company_domain_contact", "company_name_company"].includes(filter.id) && (
-                                <div className="flex w-full justify-end">
+                          {/* Industry filter now uses standard search instead of custom component */}
+                          {["company_domain_company", "company_domain_contact", "company_name_company"].includes(filter.id) && (
+                                <div className="flex w-full justify-end ">
                                   <Button variant="outline" className="px-2 text-xs" onClick={() => setIsBulkOpen(true)}>
                                     <Upload className="mr-1 size-4" /> Bulk add
                                   </Button>
                                 </div>
                               )}
                               {filter.input_type === "text" ? (
-                                <form
-                                  className="relative"
-                                  onSubmit={(e) => {
-                                    e.preventDefault()
-                                    dispatch(
-                                      addSelectedItem({
-                                        sectionId: filter.id,
-                                        item: { id: searchTerms[filter.id] || "", name: searchTerms[filter.id] || "", type: "include" }
-                                      })
-                                    )
-                                  }}
-                                >
-                                  <input
-                                    type="text"
-                                    className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-2 pr-9 text-sm text-gray-900 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-700"
-                                    placeholder={`Search ${filter.name.toLowerCase()}`}
-                                    value={searchTerms[filter.id] || ""}
-                                    onChange={(e) => handleSearchChange(filter, e.target.value)}
-                                  />
-                                  <button type="submit">
-                                    <CheckCircle className="absolute right-3 top-2.5 size-4 cursor-pointer text-green-400 dark:text-green-500" />
-                                  </button>
-                                </form>
+                                (filter.id === "industry" || filter.id === "company_location" || filter.id === "contact_location") ? (
+                                  <div className="flex items-center gap-2 ">
+                                    <button
+                                      type="button"
+                                      className="flex flex-shrink-0 items-center justify-center rounded-full bg-blue-500 p-2 hover:bg-blue-600"
+                                      onClick={() => {
+                                        if (!searchTerms[filter.id]) return;
+                                        dispatch(
+                                          addSelectedItem({
+                                            sectionId: filter.id,
+                                            item: { id: searchTerms[filter.id], name: searchTerms[filter.id], type: "include" }
+                                          })
+                                        );
+                                        dispatch(setSearchTerm({ sectionId: filter.id, term: "" }));
+                                      }}
+                                    >
+                                      <Plus className="text-white" size={18} />
+                                    </button>
+                                    <input
+                                      type="text"
+                                      className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-3 text-sm text-gray-900 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-700"
+                                      placeholder={`Search ${filter.name.toLowerCase()}`}
+                                      value={searchTerms[filter.id] || ""}
+                                      onChange={(e) => handleSearchChange(filter, e.target.value)}
+                                    />
+                                  </div>
+                                ) : (
+                                  <form
+                                    className="relative"
+                                    onSubmit={(e) => {
+                                      e.preventDefault()
+                                      dispatch(
+                                        addSelectedItem({
+                                          sectionId: filter.id,
+                                          item: { id: searchTerms[filter.id] || "", name: searchTerms[filter.id] || "", type: "include" }
+                                        })
+                                      )
+                                    }}
+                                  >
+                                    <input
+                                      type="text"
+                                      className="w-full  rounded-lg border border-gray-200 bg-white py-2 pl-2 pr-9 text-sm text-gray-900 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-700"
+                                      placeholder={`Search ${filter.name.toLowerCase()}`}
+                                      value={searchTerms[filter.id] || ""}
+                                      onChange={(e) => handleSearchChange(filter, e.target.value)}
+                                    />
+                                    <button type="submit">
+                                      <CheckCircle className="absolute right-3 top-2.5 size-4 cursor-pointer text-green-400 dark:text-green-500" />
+                                    </button>
+                                  </form>
+                                )
                               ) : filter.is_searchable ? (
                                 <div className="relative">
                                   <Search className="absolute left-3 top-2.5 size-4 text-gray-400 dark:text-gray-500" />
@@ -346,6 +397,26 @@ export const Filters = () => {
                                     value={searchTerms[filter.id] || ""}
                                     onChange={(e) => handleSearchChange(filter, e.target.value)}
                                   />
+                                  {(["industry", "company_industries", "company_location", "contact_location"].includes(filter.id)) && (
+                                    <button
+                                      type="button"
+                                      className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600"
+                                      onClick={() => {
+                                        const val = (searchTerms[filter.id] || "").trim()
+                                        if (!val) return
+                                        dispatch(
+                                          addSelectedItem({
+                                            sectionId: filter.id,
+                                            item: { id: val, name: val, type: "include" }
+                                          })
+                                        )
+                                        dispatch(setSearchTerm({ sectionId: filter.id, term: "" }))
+                                      }}
+                                      aria-label="Add keyword"
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
                               ) : null}
                               {/* Standard Tag List */}
@@ -390,13 +461,12 @@ export const Filters = () => {
                                   />
                                 </div>
                               )}
-                            </>
-                          )}
                         </div>
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
 
               {group.group_name.toLowerCase() === "personal" && (
                 <div
@@ -410,7 +480,7 @@ export const Filters = () => {
                   />
                   {!!expandedSections[personalSectionId] && (
                     <div className="p-4">
-                      <RangeSlider min={0} max={30} step={1} unit="YOE" hideHeader value={yoeRange} onChange={setYoeRange} />
+                      <RangeSlider min={0} max={30} step={1} unit="YOE" hideHeader value={yoeRange} onChange={handleYoeRangeChange} />
                     </div>
                   )}
                 </div>

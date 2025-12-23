@@ -197,6 +197,23 @@ class SearchService
             unset($filters['company_headcount_contact']);
         }
 
+        // Map frontend filter IDs to canonical backend names
+        // Industry filters can come as 'industry' or 'company_industries'
+        if (!empty($filters['company_industries']) && empty($filters['industries'])) {
+            $filters['industries'] = $filters['company_industries'];
+            unset($filters['company_industries']);
+        }
+
+        // Company Location filter can come as 'company_location' or 'company_headquarters'
+        if (!empty($filters['company_location']) && empty($filters['locations'])) {
+            $filters['locations'] = $filters['company_location'];
+            unset($filters['company_location']);
+        }
+        if (!empty($filters['company_headquarters']) && empty($filters['locations'])) {
+            $filters['locations'] = $filters['company_headquarters'];
+            unset($filters['company_headquarters']);
+        }
+
         // --- Apollo-Style Cross-Index Filtering ---
         // Extract company filters from DSL when searching contacts
         if ($type === 'contact') {
@@ -263,14 +280,24 @@ class SearchService
             }
         }
 
-        // Process regular contact filters (excluding company filters)
-        // Unwrap 'contact' bucket if present, merging it into the top-level
-        if (isset($filters['contact']) && is_array($filters['contact'])) {
-            $filters = array_merge($filters, $filters['contact']);
-        }
-        // Unwrap 'company' bucket when searching the company index
-        if ($type === 'company' && isset($filters['company']) && is_array($filters['company'])) {
-            $filters = array_merge($filters, $filters['company']);
+        // Process contact-specific filters vs company filters differently
+        $contactFilters = isset($filters['contact']) && is_array($filters['contact']) ? $filters['contact'] : [];
+        $companyFilters = isset($filters['company']) && is_array($filters['company']) ? $filters['company'] : [];
+
+        // For company searches, unwrap company bucket
+        if ($type === 'company') {
+            $filters = array_merge($filters, $companyFilters);
+            // Remove both buckets to avoid duplicate processing
+            unset($filters['contact']);
+            unset($filters['company']);
+        } else {
+            // For contact searches, keep both buckets separate for now
+            // We'll process company filters separately via resolveCompanyFiltersToDomains
+            // Remove company bucket from main $filters to avoid treating company.locations as contact.locations
+            unset($filters['company']);
+            // Also remove contact bucket for now - we'll process it separately
+            $filters = array_merge($filters, $contactFilters);
+            unset($filters['contact']);
         }
 
         // Normalize legacy/frontend filter IDs to canonical keys
@@ -443,9 +470,64 @@ class SearchService
             }
         }
 
-        // ... Locations block ... (ommitted changes for now, focusing on company fields)
+        // ... Locations block ...
+        // Company Location (Hierarchical: country, state, city)
+        // OR Contact Location (when searching contacts)
+        if (!empty($filters['locations']) && is_array($filters['locations'])) {
+            $locs = $filters['locations'];
+            $include = $locs['include'] ?? [];
+            $exclude = $locs['exclude'] ?? [];
 
-        // Employee Count (Range)
+            // Normalize to array if single value
+            if (!is_array($include)) {
+                $include = [$include];
+            }
+            if (!is_array($exclude)) {
+                $exclude = [$exclude];
+            }
+
+            $include = array_values(array_filter(array_map('trim', $include), 'strlen'));
+            $exclude = array_values(array_filter(array_map('trim', $exclude), 'strlen'));
+
+            // For company index, search in location.country, location.state, location.city
+            // For contact index, search in location.country, location.state, location.city (contact's own location)
+            if ($include) {
+                if ($type === 'company') {
+                    $should = [];
+                    $should[] = ['terms' => ['location.country' => $include]];
+                    $should[] = ['terms' => ['location.state' => $include]];
+                    $should[] = ['terms' => ['location.city' => $include]];
+                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                } else {
+                    // Contact search: filter by contact's own location, not company location
+                    $should = [];
+                    $should[] = ['terms' => ['location.country' => $include]];
+                    $should[] = ['terms' => ['location.state' => $include]];
+                    $should[] = ['terms' => ['location.city' => $include]];
+                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                }
+            }
+
+            // Exclude Logic
+            if ($exclude) {
+                if ($type === 'company') {
+                    $shouldExclude = [];
+                    $shouldExclude[] = ['terms' => ['location.country' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['location.state' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['location.city' => $exclude]];
+                    $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
+                } else {
+                    // Contact search: exclude by contact's own location
+                    $shouldExclude = [];
+                    $shouldExclude[] = ['terms' => ['location.country' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['location.state' => $exclude]];
+                    $shouldExclude[] = ['terms' => ['location.city' => $exclude]];
+                    $mustNot[] = ['bool' => ['should' => $shouldExclude, 'minimum_should_match' => 1]];
+                }
+            }
+        }
+
+        // Company Location (Single value - backward compatibility)
         if (!empty($filters['employee_count']) && is_array($filters['employee_count'])) {
             $rng = $filters['employee_count'];
             $range = [];
@@ -466,19 +548,36 @@ class SearchService
 
         // Employee Count (Headcount Buckets)
         if (!empty($filters['company_headcount']) && is_array($filters['company_headcount'])) {
-            // ... Logic same as before but applying field logic
             $ch = $filters['company_headcount'];
-            $include = array_values(array_filter(array_map('trim', (array) ($ch['include'] ?? [])), 'strlen'));
-            $exclude = array_values(array_filter(array_map('trim', (array) ($ch['exclude'] ?? [])), 'strlen'));
+            
+            // Handle numeric range format: { min: 1, max: 50 }
+            if (isset($ch['min']) || isset($ch['max'])) {
+                $range = [];
+                if (isset($ch['min']) && $ch['min'] !== null) {
+                    $range['gte'] = (int) $ch['min'];
+                }
+                if (isset($ch['max']) && $ch['max'] !== null) {
+                    $range['lte'] = (int) $ch['max'];
+                }
+                if ($range) {
+                    $field = ($type === 'company') ? 'employee_count' : 'company_obj.employee_count';
+                    $filterClauses[] = ['range' => [$field => $range]];
+                }
+                // Early return since we've handled the range format
+                // Continue to next filter
+            } else {
+                // Handle bracket format: { include: ["1-10", "11-50"], exclude: [] }
+                $include = array_values(array_filter(array_map('trim', (array) ($ch['include'] ?? [])), 'strlen'));
+                $exclude = array_values(array_filter(array_map('trim', (array) ($ch['exclude'] ?? [])), 'strlen'));
 
-            $field = ($type === 'company') ? 'employee_count' : 'company_obj.employee_count';
+                $field = ($type === 'company') ? 'employee_count' : 'company_obj.employee_count';
 
-            // ... (Include logic)
-            if ($include) {
-                $should = [];
-                foreach ($include as $bracket) {
-                    // ... regex logic ...
-                    $min = null;
+                // ... (Include logic)
+                if ($include) {
+                    $should = [];
+                    foreach ($include as $bracket) {
+                        // ... regex logic ...
+                        $min = null;
                     $max = null;
                     if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
                         $min = (int) $m[1];
@@ -502,28 +601,29 @@ class SearchService
                     $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
             }
 
-            // ... (Exclude logic) - using $field variable
-            if ($exclude) {
-                foreach ($exclude as $bracket) {
-                    // ... regex logic ...
-                    $min = null;
-                    $max = null;
-                    if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
-                        $min = (int) $m[1];
-                        $max = (int) $m[2];
-                    } elseif (preg_match('/^(\d+)\+$/', $bracket, $m)) {
-                        $min = (int) $m[1];
+                // ... (Exclude logic) - using $field variable
+                if ($exclude) {
+                    foreach ($exclude as $bracket) {
+                        // ... regex logic ...
+                        $min = null;
                         $max = null;
+                        if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/', $bracket, $m)) {
+                            $min = (int) $m[1];
+                            $max = (int) $m[2];
+                        } elseif (preg_match('/^(\d+)\+$/', $bracket, $m)) {
+                            $min = (int) $m[1];
+                            $max = null;
+                        }
+
+                        $range = [];
+                        if ($min !== null)
+                            $range['gte'] = $min;
+                        if ($max !== null)
+                            $range['lte'] = $max;
+
+                        if (!empty($range))
+                            $mustNot[] = ['range' => [$field => $range]];
                     }
-
-                    $range = [];
-                    if ($min !== null)
-                        $range['gte'] = $min;
-                    if ($max !== null)
-                        $range['lte'] = $max;
-
-                    if (!empty($range))
-                        $mustNot[] = ['range' => [$field => $range]];
                 }
             }
         }
@@ -877,6 +977,26 @@ class SearchService
                         ];
                     }
                 }
+            }
+        }
+
+        // Contact-specific: Years of Experience range filter
+        if ($type === 'contact' && !empty($filters['years_of_experience']) && is_array($filters['years_of_experience'])) {
+            $yoe = $filters['years_of_experience'];
+            $range = [];
+            
+            // Handle numeric range format: { min: 1, max: 10 }
+            if (isset($yoe['min']) || isset($yoe['max'])) {
+                if (isset($yoe['min']) && $yoe['min'] !== null) {
+                    $range['gte'] = (int) $yoe['min'];
+                }
+                if (isset($yoe['max']) && $yoe['max'] !== null) {
+                    $range['lte'] = (int) $yoe['max'];
+                }
+            }
+            
+            if (!empty($range)) {
+                $filterClauses[] = ['range' => ['years_of_experience' => $range]];
             }
         }
 

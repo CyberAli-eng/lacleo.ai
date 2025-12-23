@@ -159,8 +159,8 @@ export const IndustryFilter = () => {
             </div>
 
             {/* Search Input */}
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 size-4 text-gray-400" />
+            <div className="relative ">
+              <Search className="absolute left-2  top-2.5 size-4 text-gray-400" />
               <Input placeholder="Search industries..." value={industrySearchTerm} onChange={handleIndustrySearch} className="h-9 pl-8 text-sm" />
               {!!isIndustryLoading && <Loader2 className="absolute right-2 top-2.5 size-4 animate-spin text-gray-400" />}
             </div>
