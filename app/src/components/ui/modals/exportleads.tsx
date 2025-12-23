@@ -6,7 +6,7 @@ import { Input } from "../input"
 import { useEffect, useMemo, useState } from "react"
 import { useAppDispatch } from "@/app/hooks/reduxHooks"
 import { setCreditUsageOpen } from "@/features/settings/slice/settingSlice"
-import { useExportEstimateMutation, useExportCreateMutation } from "@/features/searchTable/slice/apiSlice"
+import { useExportEstimateMutation, useExportCreateMutation, useBillingUsageQuery } from "@/features/searchTable/slice/apiSlice"
 import { useToast } from "../use-toast"
 
 type ExportLeadsProps = {
@@ -57,6 +57,13 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
   } | null>(null)
   const [estimateExport, { isLoading: estimating }] = useExportEstimateMutation()
   const [createExport, { isLoading: exporting }] = useExportCreateMutation()
+  const { data: creditData, isLoading: loadingCredits } = useBillingUsageQuery(undefined, { skip: !open })
+  
+  // Calculate total credits from credit data
+  const totalCredits = useMemo(() => {
+    if (!creditData) return 0
+    return (creditData?.plan_total ?? 0) > 0 ? creditData.plan_total : (creditData.balance ?? 0) + (creditData.used ?? 0)
+  }, [creditData])
   const { toast } = useToast()
   const dispatch = useAppDispatch()
 
@@ -73,6 +80,11 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
     if (Number.isNaN(value) || value < 0) return 0
     // clamp to total available
     return Math.min(value, totalAvailable)
+  }, [customCount, totalAvailable])
+
+  const isCustomCountTooHigh = useMemo(() => {
+    const value = Number(customCount)
+    return !Number.isNaN(value) && value > totalAvailable && customCount !== ""
   }, [customCount, totalAvailable])
 
   const exportCount = exportMode === "selected" ? selectedCount : parsedCustomCount
@@ -100,6 +112,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
 
     const timer = setTimeout(() => {
       const ids = selectedIds
+      console.log('Export estimate - selectedIds:', ids, 'exportMode:', exportMode, 'exportCount:', exportCount)
       // If we are in "selected" mode but no IDs, zero out
       if (exportMode === "selected" && (!ids || ids.length === 0)) {
         setEstimate({
@@ -142,7 +155,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
     try {
       const res = await createExport({
         type,
-        ids: selectedIds,
+        ids: exportMode === "selected" ? selectedIds : [], // Only send IDs when in selected mode
         fields: { email: emailSelected, phone: phoneSelected },
         sanitize: !hasSelectedData,
         limit: exportCount,
@@ -246,10 +259,13 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 value={customCount}
                 onChange={(e) => setCustomCount(e.target.value)}
                 disabled={exportMode !== "custom"}
-                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""}`}
+                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""} ${isCustomCountTooHigh ? "border-red-500" : ""}`}
               />
               <span className=" text-xs font-medium text-gray-600">Out of {totalAvailable}</span>
             </div>
+            {isCustomCountTooHigh && (
+              <span className="text-xs font-medium text-red-600">Custom value is too high</span>
+            )}
           </div>
 
           <div>
@@ -278,9 +294,9 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 <span className="text-xl font-medium text-gray-950">{creditsRequired !== undefined ? creditsRequired : "..."} Credits</span>
               </div>
               <div className="border-b"></div>
-              <div className="flex w-full justify-center rounded-b-xl bg-[#F7F7F7] py-1.5">
+              <div className="flex w-full justify-center rounded-b-xl bg-[#F7F7F7] py-2.5">
                 <span className={`text-sm font-medium ${insufficient ? "text-red-600" : "text-gray-600"}`}>
-                  Available = <span className="text-gray-950">{availableCredits !== undefined ? availableCredits : "..."}</span>{" "}
+                  Total Credits: <span className="text-gray-950 font-semibold">{loadingCredits ? "..." : totalCredits}</span> | Available: <span className="text-gray-950">{availableCredits !== undefined ? availableCredits : "..."}</span>
                 </span>
               </div>
             </div>
@@ -313,7 +329,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
           <Button
             variant="outline"
             className="w-full rounded-lg bg-[#335CFF] p-2 text-sm font-medium text-white hover:bg-[#335CFF] hover:text-white"
-            disabled={exporting || estimating || exportCount <= 0 || insufficient}
+            disabled={exporting || estimating || exportCount <= 0 || insufficient || isCustomCountTooHigh}
             onClick={handleExport}
           >
             {exporting ? "Exporting..." : creditsRequired === 0 ? "Export for Free" : "Export"}
