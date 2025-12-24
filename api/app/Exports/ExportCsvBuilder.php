@@ -332,32 +332,100 @@ class ExportCsvBuilder
     public static function buildContactsCsvDynamic(array $contacts, bool $emailSelected, bool $phoneSelected): string
     {
         $contactsNorm = array_map(fn($c) => RecordNormalizer::normalizeContact(is_array($c) ? $c : ($c ? $c->toArray() : [])), $contacts);
-        // Choose header set based on checkbox combination
-        $headers = match (true) {
-            $emailSelected && $phoneSelected => self::FULL_HEADER,
-            $emailSelected && !$phoneSelected => self::EMAIL_ONLY_HEADER,
-            !$emailSelected && $phoneSelected => self::PHONE_ONLY_HEADER,
-            default => self::FREE_EXPORT_HEADER,
-        };
+        
+        // Contact header schema - expanded to match Elasticsearch contact document structure
+        $headers = [
+            'id',
+            'first_name',
+            'last_name',
+            'full_name',
+            'title',
+            'seniority',
+            'departments',
+            'email',
+            'mobile_phone',
+            'direct_phone',
+            'linkedin_url',
+            'person_city',
+            'person_state',
+            'person_country',
+            'company_id',
+            'company_name',
+            'company_domain',
+            'company_website',
+            'company_industry',
+            'company_employee_count',
+            'company_linkedin_url',
+            'company_facebook_url',
+            'company_twitter_url',
+            'company_phone',
+            'company_location_street',
+            'company_location_city',
+            'company_location_state',
+            'company_location_country',
+            'company_location_postal_code',
+            'company_location_formatted',
+            'company_founded_year',
+            'company_technologies',
+            'company_keywords',
+        ];
+        
         $out = fopen('php://temp', 'r+');
         fputcsv($out, $headers);
 
-        // If neither checkbox is selected, user only requested a "vacant" CSV:
-        // return just the header row with no data.
-        if (!$emailSelected && !$phoneSelected) {
-            rewind($out);
-            return stream_get_contents($out);
-        }
-
         foreach ($contactsNorm as $c) {
-            // Build a FULL_HEADER-shaped row, then project it down to the
-            // active header set so the column count always matches.
-            $fullRow = self::composeContactRowDynamic($c, $emailSelected, $phoneSelected);
-            $row = [];
-            foreach ($headers as $col) {
-                $idx = array_search($col, self::FULL_HEADER, true);
-                $row[] = $idx === false ? '' : ($fullRow[$idx] ?? '');
+            // Extract company location sub-fields if they exist
+            $companyLocation = $c['company_location'] ?? $c['location'] ?? [];
+            
+            // Handle emails - only include if email field is selected, otherwise empty
+            $email = '';
+            if ($emailSelected) {
+                $email = (string) (RecordNormalizer::getPrimaryEmail($c) ?? $c['email'] ?? $c['work_email'] ?? '');
             }
+            
+            // Handle phone numbers - only include if phone field is selected, otherwise empty
+            $mobilePhone = '';
+            $directPhone = '';
+            if ($phoneSelected) {
+                $mobilePhone = (string) ($c['mobile_phone'] ?? $c['mobile_number'] ?? '');
+                $directPhone = (string) ($c['direct_phone'] ?? $c['direct_number'] ?? '');
+            }
+            
+            $row = [
+                (string) ($c['_id'] ?? $c['id'] ?? ''),
+                (string) ($c['first_name'] ?? ''),
+                (string) ($c['last_name'] ?? ''),
+                (string) ($c['full_name'] ?? (($c['first_name'] ?? '') . ' ' . ($c['last_name'] ?? ''))),
+                (string) ($c['title'] ?? ''),
+                (string) ($c['seniority'] ?? ''),
+                is_array($c['departments'] ?? null) ? implode('; ', $c['departments']) : (string) ($c['departments'] ?? ''),
+                $email,
+                $mobilePhone,
+                $directPhone,
+                (string) ($c['linkedin_url'] ?? $c['person_linkedin_url'] ?? ''),
+                (string) ($c['city'] ?? ''),
+                (string) ($c['state'] ?? ''),
+                (string) ($c['country'] ?? ''),
+                (string) ($c['company_id'] ?? ''),
+                (string) ($c['company'] ?? $c['company_name'] ?? ''),
+                (string) ($c['domain'] ?? $c['company_domain'] ?? ''),
+                (string) ($c['website'] ?? $c['company_website'] ?? ''),
+                (string) ($c['industry'] ?? $c['company_industry'] ?? ''),
+                (string) ($c['employee_count'] ?? $c['number_of_employees'] ?? $c['company_employee_count'] ?? ''),
+                (string) ($c['company_linkedin_url'] ?? ''),
+                (string) ($c['facebook_url'] ?? $c['company_facebook_url'] ?? ''),
+                (string) ($c['twitter_url'] ?? $c['company_twitter_url'] ?? ''),
+                (string) ($c['company_phone'] ?? $c['phone_number'] ?? ''),
+                (string) ($companyLocation['street'] ?? $c['street'] ?? ''),
+                (string) ($companyLocation['city'] ?? $c['company_city'] ?? ''),
+                (string) ($companyLocation['state'] ?? $c['company_state'] ?? ''),
+                (string) ($companyLocation['country'] ?? $c['company_country'] ?? ''),
+                (string) ($companyLocation['postal_code'] ?? $c['postal_code'] ?? ''),
+                (string) ($companyLocation['formatted'] ?? $c['address'] ?? ''),
+                (string) ($c['founded_year'] ?? $c['company_founded_year'] ?? ''),
+                is_array($c['technologies'] ?? null) ? implode('; ', $c['technologies']) : (string) ($c['technologies'] ?? ''),
+                is_array($c['keywords'] ?? null) ? implode('; ', $c['keywords']) : (string) ($c['keywords'] ?? ''),
+            ];
 
             if (implode('', $row) === '') {
                 continue;
@@ -386,75 +454,83 @@ class ExportCsvBuilder
             'companies_in' => count($companies),
             'companies_norm' => count($companiesNorm),
         ]);
-        foreach ($companiesNorm as $idx => $company) {
-            $id = $company['_id'] ?? $company['id'] ?? $company['domain'] ?? $company['website'] ?? 'unknown';
-            $name = $company['name'] ?? $company['company'] ?? 'unknown';
-            Log::info('buildCompaniesCsvDynamic.company', [
-                'index' => $idx,
-                'id' => $id,
-                'name' => $name,
-                'domain' => $company['domain'] ?? 'N/A',
-                'website' => $company['website'] ?? 'N/A',
-            ]);
-        }
 
         $written = 0;
 
-        // Company-only header schema
+        // Company header schema - expanded to match Elasticsearch company document structure
         $headers = [
+            'id',
             'domain',
             'name',
             'website',
-            'number_of_employees',
+            'business_category',
+            'employee_count',
             'industry',
+            'founded_year',
+            'company_type',
             'linkedin_url',
             'facebook_url',
             'twitter_url',
-            'street',
-            'city',
-            'state',
-            'country',
-            'postal_code',
-            'address',
             'phone_number',
-            'keywords',
             'technologies',
-            'total_funding_usd',
-            'annual_revenue_usd',
+            'keywords',
+            'location_street',
+            'location_city',
+            'location_state',
+            'location_country',
+            'location_postal_code',
+            'location_region',
+            'location_formatted',
             'sic_code',
-            'short_description',
-            'founded_year',
+            'naics_code',
+            'description',
+            'annual_revenue_usd',
+            'total_funding_usd',
+            'latest_funding_amount',
+            'latest_funding_round',
+            'last_funding_date',
         ];
 
         $out = fopen('php://temp', 'r+');
         fputcsv($out, $headers);
 
         foreach ($companiesNorm as $company) {
+            // Extract location sub-fields
+            $location = $company['location'] ?? [];
+            
             $row = [
+                (string) ($company['_id'] ?? $company['id'] ?? ''),
                 (string) ($company['domain'] ?? ''),
                 (string) ($company['name'] ?? $company['company'] ?? ''),
                 (string) ($company['website'] ?? ''),
-                (string) ($company['number_of_employees'] ?? ''),
+                (string) ($company['business_category'] ?? ''),
+                (string) ($company['employee_count'] ?? $company['number_of_employees'] ?? ''),
                 (string) ($company['industry'] ?? ''),
+                (string) ($company['founded_year'] ?? ''),
+                (string) ($company['company_type'] ?? ''),
                 (string) ($company['linkedin_url'] ?? ''),
                 (string) ($company['facebook_url'] ?? ''),
                 (string) ($company['twitter_url'] ?? ''),
-                (string) ($company['street'] ?? ''),
-                (string) ($company['city'] ?? ''),
-                (string) ($company['state'] ?? ''),
-                (string) ($company['country'] ?? ''),
-                (string) ($company['postal_code'] ?? ''),
-                (string) ($company['address'] ?? ''),
-                (string) ($company['phone_number'] ?? ''),
-                is_array($company['keywords'] ?? null) ? implode('; ', $company['keywords']) : (string) ($company['keywords'] ?? ''),
+                (string) ($company['phone_number'] ?? $company['company_phone'] ?? ''),
                 is_array($company['technologies'] ?? null) ? implode('; ', $company['technologies']) : (string) ($company['technologies'] ?? ''),
-                (string) ($company['total_funding_usd'] ?? ''),
-                (string) ($company['annual_revenue_usd'] ?? ''),
+                is_array($company['keywords'] ?? null) ? implode('; ', $company['keywords']) : (string) ($company['keywords'] ?? ''),
+                (string) ($location['street'] ?? $company['street'] ?? ''),
+                (string) ($location['city'] ?? $company['city'] ?? ''),
+                (string) ($location['state'] ?? $company['state'] ?? ''),
+                (string) ($location['country'] ?? $company['country'] ?? ''),
+                (string) ($location['postal_code'] ?? $company['postal_code'] ?? ''),
+                (string) ($location['region'] ?? ''),
+                (string) ($location['formatted'] ?? $company['address'] ?? ''),
                 (string) ($company['sic_code'] ?? ''),
-                (string) ($company['short_description'] ?? ''),
-                (string) ($company['founded_year'] ?? ''),
+                (string) ($company['naics_code'] ?? ''),
+                (string) ($company['description'] ?? $company['short_description'] ?? ''),
+                (string) ($company['annual_revenue_usd'] ?? ''),
+                (string) ($company['total_funding_usd'] ?? ''),
+                (string) ($company['latest_funding_amount'] ?? ''),
+                (string) ($company['latest_funding_round'] ?? $company['latest_funding'] ?? ''),
+                (string) ($company['last_funding_date'] ?? $company['last_raised_at'] ?? ''),
             ];
-            // Always write the row, even if all fields are empty
+            
             fputcsv($out, $row);
             $written++;
         }
