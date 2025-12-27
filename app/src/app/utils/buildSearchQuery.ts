@@ -21,14 +21,21 @@ interface ExperienceFilter {
 const mapIdToDslKey: Record<string, string> = {
   // Actual API filter IDs (from /filters endpoint)
   industry: "industries",
-  company_location: "company_location",
   company_headcount: "company_headcount",
+  annual_revenue: "annual_revenue",
+  founded_year: "founded_year",
+  total_funding: "total_funding",
+  annual_revenue_contact: "annual_revenue",
+  founded_year_contact: "founded_year",
+  total_funding_contact: "total_funding",
   
   // Legacy/alternate mappings (for backward compat if needed)
   contact_location: "locations",
-  company_location_company: "locations",
+  // ...existing code...
   company_headquarters: "locations",
   technologies: "technologies",
+  company_technologies: "technologies",  // Map to technologies
+  company_technologies_contact: "technologies",  // Map to technologies (contact scope but company field)
   employee_count: "company_headcount",  // Map to company_headcount for bracket handling
   company_employee_count: "company_headcount",  // Map to company_headcount for bracket handling
   company_revenue: "revenue",
@@ -53,14 +60,19 @@ const mapIdToDslKey: Record<string, string> = {
   contact_country: "country",
   contact_state: "state",
   contact_city: "city",
+  company_country: "country",
+  company_state: "state",
+  company_city: "city",
   company_keywords: "company_keywords"
 }
 
 const companyBucketKeys = new Set([
   // Actual API keys
   "industry",
-  "company_location",
   "company_headcount",
+  "annual_revenue",
+  "founded_year",
+  "total_funding",
   // Legacy keys
   "revenue",
   "employee_count",
@@ -69,7 +81,6 @@ const companyBucketKeys = new Set([
   "domains",
   "company_names",
   "company_keywords",
-  "founded_year",
   "locations"
 ])
 
@@ -80,7 +91,13 @@ const rangeFilterKeys = new Set([
   "company_revenue_range",
   "years_of_experience",
   "contact_experience_years",
-  "company_founded_year"
+  "company_founded_year",
+  "annual_revenue",
+  "annual_revenue_contact",
+  "founded_year",
+  "founded_year_contact",
+  "total_funding",
+  "total_funding_contact"
 ])
 
 // Boolean filters
@@ -260,8 +277,18 @@ export function buildSearchQuery(
     if (rangeFilterKeys.has(sectionId)) {
       let filterValue: FilterValue | null = null
 
-      if (sectionId.includes("revenue")) {
+      if (sectionId.includes("revenue") && !sectionId.includes("annual")) {
+        // Old 'revenue' filter uses parseRevenue, but annual_revenue uses brackets
         filterValue = buildRevenueFilter(items)
+      } else if (sectionId.includes("annual_revenue")) {
+        // Annual revenue uses bracket selections like "0-1M", "1M-10M"
+        filterValue = buildIncludeExclude(items, sectionId)
+      } else if (sectionId.includes("funding")) {
+        // Total funding also uses bracket selections like "1M-10M"
+        filterValue = buildIncludeExclude(items, sectionId)
+      } else if (sectionId.includes("founded") || sectionId.includes("year")) {
+        // Founded year uses bracket selections with metadata ranges
+        filterValue = buildIncludeExclude(items, sectionId)
       } else if (sectionId.includes("experience") && !sectionId.includes("years_of")) {
         // Use buildExperienceFilter only for non-years_of_experience experience filters
         filterValue = buildExperienceFilter(items)
@@ -302,10 +329,10 @@ export function buildSearchQuery(
     }
 
     // 3. Location filters (special handling)
-    if (sectionId === "company_location" || sectionId === "company_headquarters") {
+    if (sectionId === "company_headquarters") {
       const filterObj = buildIncludeExclude(items, sectionId)
       if (!filterObj) return
-      dsl.company["company_location"] = filterObj
+      dsl.company["company_headquarters"] = filterObj
       return
     }
 
@@ -322,6 +349,21 @@ export function buildSearchQuery(
         dsl.contact["city"] = filterObj
       } else {
         dsl.contact["locations"] = filterObj
+      }
+      return
+    }
+
+    if (sectionId === "company_country" || sectionId === "company_state" || sectionId === "company_city") {
+      const filterObj = buildIncludeExclude(items, sectionId)
+      if (!filterObj) return
+
+      // For company location fields, map to country/state/city
+      if (sectionId === "company_country") {
+        dsl.company["country"] = filterObj
+      } else if (sectionId === "company_state") {
+        dsl.company["state"] = filterObj
+      } else if (sectionId === "company_city") {
+        dsl.company["city"] = filterObj
       }
       return
     }

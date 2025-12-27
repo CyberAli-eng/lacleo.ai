@@ -16,7 +16,6 @@ export const FILTER_KEYS = {
   INDUSTRY: "industry", // or 'industries'
   TECHNOLOGIES: "technologies",
   COMPANY_KEYWORDS: "company_keywords",
-  COMPANY_LOCATION: "company_location", // if distinct from contact location in response structure
 
   // Custom / Dynamic
   CUSTOM: "custom" // New field for flexible chips

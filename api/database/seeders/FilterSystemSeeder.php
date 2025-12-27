@@ -291,14 +291,15 @@ class FilterSystemSeeder extends Seeder
         );
 
         // Total Funding
+        // NOTE: Disabled until total_funding_usd data is available in Elasticsearch
         Filter::updateOrCreate(
             ['filter_id' => 'total_funding'],
             [
-                'is_active' => true,
+                'is_active' => false,
                 'filter_group_id' => $group->id,
                 'filter_type' => 'company',
                 'name' => 'Total Funding',
-                'elasticsearch_field' => 'total_funding',
+                'elasticsearch_field' => 'total_funding_usd',
                 'value_source' => 'predefined',
                 'value_type' => 'number',
                 'input_type' => 'select',
@@ -351,14 +352,15 @@ class FilterSystemSeeder extends Seeder
         );
 
         // Total Funding (Contact - filters via company join)
+        // NOTE: Disabled until total_funding_usd data is available in Elasticsearch
         Filter::updateOrCreate(
             ['filter_id' => 'total_funding_contact'],
             [
-                'is_active' => true,
+                'is_active' => false,
                 'filter_group_id' => $group->id,
                 'filter_type' => 'contact',
                 'name' => 'Total Funding',
-                'elasticsearch_field' => 'total_funding',
+                'elasticsearch_field' => 'total_funding_usd',
                 'value_source' => 'predefined',
                 'value_type' => 'number',
                 'input_type' => 'select',
@@ -372,10 +374,11 @@ class FilterSystemSeeder extends Seeder
         );
 
         // Company Size / Employee (Contact - filters via company join)
+        // DISABLED: Duplicate of company_headcount_contact
         Filter::updateOrCreate(
             ['filter_id' => 'employee_count_contact'],
             [
-                'is_active' => true,
+                'is_active' => false, // Deactivated - use company_headcount_contact instead
                 'filter_group_id' => $group->id,
                 'filter_type' => 'contact',
                 'name' => 'Company Size / Employee',

@@ -41,6 +41,26 @@ class SearchService
         ?array $cursor = null
     ): array {
         try {
+            // DEBUG: Log initial request
+            Log::info('=== SearchService.search() START ===', [
+                'type' => $type,
+                'has_query' => !empty($query),
+                'has_filters' => !empty($filterDsl),
+                'filter_keys' => array_keys($filterDsl),
+                'page' => $page,
+                'perPage' => $perPage,
+            ]);
+            
+            // Debug: Log filter_dsl received
+            if (!empty($filterDsl)) {
+                Log::debug('SearchService.search() received filter_dsl', [
+                    'filter_dsl' => $filterDsl,
+                    'filter_dsl_keys' => array_keys($filterDsl),
+                    'has_company_bucket' => isset($filterDsl['company']),
+                    'company_bucket_keys' => isset($filterDsl['company']) ? array_keys($filterDsl['company']) : [],
+                ]);
+            }
+            
             $page = max(1, (int) $page);
             $perPage = max(1, min(100, (int) $perPage));
             $modelClass = $this->getModelClass($type);
@@ -48,12 +68,18 @@ class SearchService
 
             $index = (new $modelClass())->getReadAlias();
             $builder->index($index);
+            
+            Log::info('Search: Index selected', ['index' => $index]);
 
             // Apply boolean filters (DSL)
             $this->applyFilters($builder, $type, $filterDsl);
+            
+            Log::info('Search: Filters applied');
 
             // Apply standard keyword search if present
             $this->applySearchQuery($builder, $type, $modelClass::globalSearchFields(), $query);
+            
+            Log::info('Search: Search query applied');
 
             if ($cursor) {
                 // If cursor is provided, use search_after and force page 1 logic (from 0)
@@ -92,6 +118,11 @@ class SearchService
 
             // Aggregations for filter UIs (industries, locations, size, technologies, has_xx)
             $this->applyAggregations($builder, $type, $filterDsl);
+            
+            Log::info('Search: Before pagination', [
+                'page' => $page,
+                'perPage' => $perPage,
+            ]);
 
             // Return full _source for each ES hit (no source filtering)
 
@@ -113,6 +144,11 @@ class SearchService
             // For this specific tool call, I will perform the pagination call.
 
             $results = $builder->paginate($page, $perPage);
+            
+            Log::info('Search: After pagination', [
+                'total' => $results['total'] ?? 0,
+                'returned' => count($results['data'] ?? []),
+            ]);
 
             return $this->formatResults($results, $type, $filterDsl);
         } catch (Exception $e) {
@@ -184,6 +220,12 @@ class SearchService
      */
     private function applyFilters(ElasticQueryBuilder $builder, string $type, array $filters): void
     {
+        Log::info('applyFilters: START', [
+            'type' => $type,
+            'filter_keys' => array_keys($filters),
+            'filter_count' => count($filters),
+        ]);
+        
         // Store original filters for debugging
         $this->lastAppliedClauses = ['original_filters' => $filters];
 
@@ -216,12 +258,11 @@ class SearchService
                 'company_revenue',
                 'company_industries',
                 'company_technologies',
-                'company_locations',
+                // Removed company_locations
                 'company_founded_year',
                 'company_domains',
                 'company_has',
                 'company_names',
-                'company_location',
                 'company_headquarters',
                 'company_keywords',
                 // Canonical (UI may send plain company fields on contacts page)
@@ -287,8 +328,6 @@ class SearchService
         Log::info('All filters after unwrapping', [
             'type' => $type,
             'filters' => array_keys($filters),
-            'has_company_location' => isset($filters['company_location']),
-            'company_location_value' => $filters['company_location'] ?? null
         ]);
 
         // Normalize legacy/frontend filter IDs to canonical keys
@@ -499,6 +538,166 @@ class SearchService
             }
         }
 
+        // --- Locations block ---
+        // Removed support for company location filters
+        if (!empty($filters['locations']) || !empty($filters['country']) || !empty($filters['state']) || !empty($filters['city'])) {
+            // Log incoming location filters for debugging
+            Log::info('Location filter received', [
+                'type' => $type,
+                'has_locations' => !empty($filters['locations']),
+                'locations_value' => $filters['locations'] ?? null
+            ]);
+
+            // Normalize buckets: allow either `locations: { include, exclude }` or top-level country/state/city keys
+            $locBucket = is_array($filters['locations'] ?? null) ? $filters['locations'] : [];
+            $countryBucket = is_array($filters['country'] ?? null) ? $filters['country'] : [];
+            $stateBucket = is_array($filters['state'] ?? null) ? $filters['state'] : [];
+            $cityBucket = is_array($filters['city'] ?? null) ? $filters['city'] : [];
+
+            // Support both new format (countries/states/cities) and simple format (include/exclude)
+            $simpleInclude = array_values(array_filter(array_map('trim', (array) ($locBucket['include'] ?? [])), 'strlen'));
+            $simpleExclude = array_values(array_filter(array_map('trim', (array) ($locBucket['exclude'] ?? [])), 'strlen'));
+            
+            $incCountries = array_values(array_filter(array_map('trim', (array) ($locBucket['countries'] ?? $countryBucket['include'] ?? $simpleInclude)), 'strlen'));
+            $excCountries = array_values(array_filter(array_map('trim', (array) ($locBucket['countries_exclude'] ?? $countryBucket['exclude'] ?? $simpleExclude)), 'strlen'));
+
+            Log::info('Location filter parsed', [
+                'type' => $type,
+                'simpleInclude' => $simpleInclude,
+                'incCountries' => $incCountries,
+                'excCountries' => $excCountries
+            ]);
+
+            $incStates = array_values(array_filter(array_map('trim', (array) ($locBucket['states'] ?? $stateBucket['include'] ?? [])), 'strlen'));
+            $excStates = array_values(array_filter(array_map('trim', (array) ($locBucket['states_exclude'] ?? $stateBucket['exclude'] ?? [])), 'strlen'));
+
+            $incCities = array_values(array_filter(array_map('trim', (array) ($locBucket['cities'] ?? $cityBucket['include'] ?? [])), 'strlen'));
+            $excCities = array_values(array_filter(array_map('trim', (array) ($locBucket['cities_exclude'] ?? $cityBucket['exclude'] ?? [])), 'strlen'));
+
+            $presence = $locBucket['presence'] ?? ($filters['location_presence'] ?? ($filters['known'] ?? null));
+
+            // Normalizer - lowercase, remove punctuation
+            $normalize = function (string $v): string {
+                $s = mb_strtolower(trim($v));
+                $s = preg_replace('/[\p{P}\p{S}]+/u', ' ', $s);
+                $s = preg_replace('/\s+/u', ' ', $s);
+                return trim($s);
+            };
+
+            // Determine fields to match depending on type
+            if ($type === 'company') {
+                // For company searches, use the nested location fields
+                $countryFields = ['location.country'];
+                $stateFields = ['location.state'];
+                $cityFields = ['location.city'];
+            } else {
+                // contact: prefer person location, but include company_obj.* as fallback if searching contacts-by-company
+                $countryFields = ['location.country', 'country', 'company_obj.location.country', 'company_obj.country'];
+                $stateFields = ['location.state', 'state', 'company_obj.location.state', 'company_obj.state'];
+                $cityFields = ['location.city', 'city', 'company_obj.location.city', 'company_obj.city'];
+            }
+
+            // Helper to build per-value clauses across multiple fields using exact term matching
+            // For location fields, we use the original value (case-sensitive) since ES stores exact case
+            $buildIncludeClauses = function (array $values, array $fields) use ($normalize, $countryFields, $stateFields, $cityFields) {
+                $should = [];
+                foreach ($values as $val) {
+                    // For location fields, use exact case; for others, normalize to lowercase
+                    $isLocationField = in_array($fields[0] ?? null, array_merge($countryFields ?? [], $stateFields ?? [], $cityFields ?? []));
+                    $n = $isLocationField ? trim($val) : $normalize($val);
+                    
+                    if ($n === '')
+                        continue;
+                    foreach ($fields as $f) {
+                        // For location fields, use term query with exact case
+                        if ($isLocationField) {
+                            $should[] = ['term' => [$f => $n]];
+                        } else {
+                            // For non-location fields, use both term and match for flexibility
+                            $should[] = ['term' => [$f => $n]];
+                            $should[] = ['match' => [$f => ['query' => $n, 'operator' => 'and']]];
+                        }
+                    }
+                }
+                return $should;
+            };
+
+            $buildExcludeClauses = function (array $values, array $fields) use ($normalize, $countryFields, $stateFields, $cityFields) {
+                $clauses = [];
+                foreach ($values as $val) {
+                    // For location fields, use exact case; for others, normalize to lowercase
+                    $isLocationField = in_array($fields[0] ?? null, array_merge($countryFields ?? [], $stateFields ?? [], $cityFields ?? []));
+                    $n = $isLocationField ? trim($val) : $normalize($val);
+                    
+                    if ($n === '')
+                        continue;
+                    foreach ($fields as $f) {
+                        $clauses[] = ['term' => [$f => $n]];
+                    }
+                }
+                return $clauses;
+            };
+
+            // Include countries/states/cities
+            if ($incCountries) {
+                Log::info('Building location filter clauses', [
+                    'incCountries' => $incCountries,
+                    'countryFields' => $countryFields
+                ]);
+                $clauses = $buildIncludeClauses($incCountries, $countryFields);
+                Log::info('Location clauses built', [
+                    'clauses_count' => count($clauses),
+                    'clauses' => $clauses
+                ]);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
+            }
+            if ($incStates) {
+                $clauses = $buildIncludeClauses($incStates, $stateFields);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
+            }
+            if ($incCities) {
+                $clauses = $buildIncludeClauses($incCities, $cityFields);
+                if ($clauses)
+                    $filterClauses[] = ['bool' => ['should' => $clauses, 'minimum_should_match' => 1]];
+            }
+
+            // Exclude
+            if ($excCountries) {
+                $clauses = $buildExcludeClauses($excCountries, $countryFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
+            if ($excStates) {
+                $clauses = $buildExcludeClauses($excStates, $stateFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
+            if ($excCities) {
+                $clauses = $buildExcludeClauses($excCities, $cityFields);
+                foreach ($clauses as $c)
+                    $mustNot[] = $c;
+            }
+
+            // Presence handling
+            if ($presence === 'known' || $presence === true || $presence === 'true') {
+                // require at least one of the country/state/city fields to exist
+                $existsShould = [];
+                foreach (array_merge($countryFields, $stateFields, $cityFields) as $f) {
+                    $existsShould[] = ['exists' => ['field' => $f]];
+                }
+                if ($existsShould)
+                    $filterClauses[] = ['bool' => ['should' => $existsShould, 'minimum_should_match' => 1]];
+            } elseif ($presence === 'unknown' || $presence === false || $presence === 'false') {
+                // none of those fields should exist
+                foreach (array_merge($countryFields, $stateFields, $cityFields) as $f) {
+                    $mustNot[] = ['exists' => ['field' => $f]];
+                }
+            }
+
+            // End locations block
+        }
         
 
         // Employee Count (Range)
@@ -658,33 +857,255 @@ class SearchService
             }
         }
 
-        // Technologies (Company stack - high precision)
+        // Annual Revenue (Bracket-based filter)
+        if (!empty($filters['annual_revenue']) && is_array($filters['annual_revenue'])) {
+            $ar = $filters['annual_revenue'];
+            $field = 'annual_revenue';
+            $include = array_values(array_filter(array_map('trim', (array) ($ar['include'] ?? [])), 'strlen'));
+            $exclude = array_values(array_filter(array_map('trim', (array) ($ar['exclude'] ?? [])), 'strlen'));
+
+            // Helper to parse money format
+            $parseMoney = function ($val) {
+                $val = strtoupper(str_replace(['$', ',', ' '], '', $val));
+                $mult = 1;
+                if (str_ends_with($val, 'M')) {
+                    $mult = 1000000;
+                    $val = substr($val, 0, -1);
+                } elseif (str_ends_with($val, 'B')) {
+                    $mult = 1000000000;
+                    $val = substr($val, 0, -1);
+                } elseif (str_ends_with($val, 'K')) {
+                    $mult = 1000;
+                    $val = substr($val, 0, -1);
+                }
+                return is_numeric($val) ? ((float) $val) * $mult : null;
+            };
+
+            if ($include) {
+                $should = [];
+                foreach ($include as $bracket) {
+                    $min = null;
+                    $max = null;
+                    if (str_contains($bracket, '+')) {
+                        $parts = explode('+', $bracket);
+                        $min = $parseMoney($parts[0]);
+                    } elseif (str_contains($bracket, '-')) {
+                        $parts = explode('-', $bracket);
+                        $min = $parseMoney($parts[0]);
+                        $max = $parseMoney($parts[1] ?? '');
+                    } else {
+                        $min = $parseMoney($bracket);
+                        $max = $min;
+                    }
+
+                    $r = [];
+                    if ($min !== null)
+                        $r['gte'] = $min;
+                    if ($max !== null)
+                        $r['lte'] = $max;
+
+                    if ($r)
+                        $should[] = ['range' => [$field => $r]];
+                }
+                if ($should)
+                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+            }
+
+            if ($exclude) {
+                foreach ($exclude as $bracket) {
+                    $min = null;
+                    $max = null;
+                    if (str_contains($bracket, '+')) {
+                        $parts = explode('+', $bracket);
+                        $min = $parseMoney($parts[0]);
+                    } elseif (str_contains($bracket, '-')) {
+                        $parts = explode('-', $bracket);
+                        $min = $parseMoney($parts[0]);
+                        $max = $parseMoney($parts[1] ?? '');
+                    } else {
+                        $min = $parseMoney($bracket);
+                        $max = $min;
+                    }
+
+                    $r = [];
+                    if ($min !== null)
+                        $r['gte'] = $min;
+                    if ($max !== null)
+                        $r['lte'] = $max;
+
+                    if ($r)
+                        $mustNot[] = ['range' => [$field => $r]];
+                }
+            }
+        }
+
+        // Founded Year (Bracket-based filter)
+        if (!empty($filters['founded_year']) && is_array($filters['founded_year'])) {
+            $fy = $filters['founded_year'];
+            $field = 'founded_year';
+            $include = array_values(array_filter(array_map('trim', (array) ($fy['include'] ?? [])), 'strlen'));
+            $exclude = array_values(array_filter(array_map('trim', (array) ($fy['exclude'] ?? [])), 'strlen'));
+
+            // Map year bracket strings to numeric ranges
+            $yearBrackets = [
+                'before-1950' => [null, 1950],
+                '1950-1975' => [1950, 1975],
+                '1976-1990' => [1976, 1990],
+                '1991-2000' => [1991, 2000],
+                '2001-2010' => [2001, 2010],
+                '2011-2015' => [2011, 2015],
+                '2016-2020' => [2016, 2020],
+                '2021-present' => [2021, null],
+            ];
+
+            if ($include) {
+                $should = [];
+                foreach ($include as $bracket) {
+                    if (isset($yearBrackets[$bracket])) {
+                        [$min, $max] = $yearBrackets[$bracket];
+                        $r = [];
+                        if ($min !== null)
+                            $r['gte'] = $min;
+                        if ($max !== null)
+                            $r['lte'] = $max;
+
+                        if ($r)
+                            $should[] = ['range' => [$field => $r]];
+                    }
+                }
+                if ($should)
+                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+            }
+
+            if ($exclude) {
+                foreach ($exclude as $bracket) {
+                    if (isset($yearBrackets[$bracket])) {
+                        [$min, $max] = $yearBrackets[$bracket];
+                        $r = [];
+                        if ($min !== null)
+                            $r['gte'] = $min;
+                        if ($max !== null)
+                            $r['lte'] = $max;
+
+                        if ($r)
+                            $mustNot[] = ['range' => [$field => $r]];
+                    }
+                }
+            }
+        }
+
+        // Total Funding (Bracket-based filter)
+        if (!empty($filters['total_funding']) && is_array($filters['total_funding'])) {
+            $tf = $filters['total_funding'];
+            $field = 'total_funding_usd';
+            $include = array_values(array_filter(array_map('trim', (array) ($tf['include'] ?? [])), 'strlen'));
+            $exclude = array_values(array_filter(array_map('trim', (array) ($tf['exclude'] ?? [])), 'strlen'));
+
+            // Helper to parse money format
+            $parseMoney = function ($val) {
+                $val = strtoupper(str_replace(['$', ',', ' '], '', $val));
+                $mult = 1;
+                if (str_ends_with($val, 'M')) {
+                    $mult = 1000000;
+                    $val = substr($val, 0, -1);
+                } elseif (str_ends_with($val, 'B')) {
+                    $mult = 1000000000;
+                    $val = substr($val, 0, -1);
+                } elseif (str_ends_with($val, 'K')) {
+                    $mult = 1000;
+                    $val = substr($val, 0, -1);
+                }
+                return is_numeric($val) ? ((float) $val) * $mult : null;
+            };
+
+            if ($include) {
+                $should = [];
+                foreach ($include as $bracket) {
+                    $min = null;
+                    $max = null;
+                    if (str_contains($bracket, '+')) {
+                        $parts = explode('+', $bracket);
+                        $min = $parseMoney($parts[0]);
+                    } elseif (str_contains($bracket, '-')) {
+                        $parts = explode('-', $bracket);
+                        $min = $parseMoney($parts[0]);
+                        $max = $parseMoney($parts[1] ?? '');
+                    } else {
+                        $min = $parseMoney($bracket);
+                        $max = $min;
+                    }
+
+                    $r = [];
+                    if ($min !== null)
+                        $r['gte'] = $min;
+                    if ($max !== null)
+                        $r['lte'] = $max;
+
+                    if ($r)
+                        $should[] = ['range' => [$field => $r]];
+                }
+                if ($should)
+                    $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+            }
+
+            if ($exclude) {
+                foreach ($exclude as $bracket) {
+                    $min = null;
+                    $max = null;
+                    if (str_contains($bracket, '+')) {
+                        $parts = explode('+', $bracket);
+                        $min = $parseMoney($parts[0]);
+                    } elseif (str_contains($bracket, '-')) {
+                        $parts = explode('-', $bracket);
+                        $min = $parseMoney($parts[0]);
+                        $max = $parseMoney($parts[1] ?? '');
+                    } else {
+                        $min = $parseMoney($bracket);
+                        $max = $min;
+                    }
+
+                    $r = [];
+                    if ($min !== null)
+                        $r['gte'] = $min;
+                    if ($max !== null)
+                        $r['lte'] = $max;
+
+                    if ($r)
+                        $mustNot[] = ['range' => [$field => $r]];
+                }
+            }
+        }
+
+        // Technologies (Company stack - handles comma-separated technology values)
+        // Format: "Microsoft Office 365, JQuery 2.1.1, Micro, Remote, AI"
+        // NOTE: Field 'company_technologies' exists in _source but is NOT indexed in Elasticsearch
+        // Therefore, we apply filtering at the application level (in formatResults) instead of ES-side
+        // This section is SKIPPED and filtering happens post-search via formatResults()
+        /*
         if (!empty($filters['technologies'])) {
             $tech = $filters['technologies'];
             $includeRaw = array_values(array_filter(array_map('trim', (array) ($tech['include'] ?? [])), 'strlen'));
             $excludeRaw = array_values(array_filter(array_map('trim', (array) ($tech['exclude'] ?? [])), 'strlen'));
 
-            $field = ($type === 'company') ? 'technologies_normalized' : 'company_obj.technologies_normalized';
-            $rawFields = ($type === 'company')
-                ? ['technologies', 'company_technologies', 'tech_stack']
-                : ['company_obj.technologies', 'company_obj.company_technologies', 'company_obj.tech_stack'];
+            // Use 'company_technologies' field for company searches, 'company_obj.company_technologies' for contact searches
+            $field = ($type === 'company') ? 'company_technologies' : 'company_obj.company_technologies';
 
             if ($includeRaw) {
-                $includeNorm = RecordNormalizer::normalizeTechnologies($includeRaw);
                 $shouldTech = [];
 
-                // 1. Exact canonical matches (Keyword)
-                if ($includeNorm) {
-                    $shouldTech[] = ['terms' => [$field => $includeNorm]];
-                }
-
-                // 2. Phrase matches for compound/unmapped terms (Boosted)
+                // For each included technology, use query_string to search in keyword field
                 foreach ($includeRaw as $t) {
+                    // Escape special characters for query_string syntax
+                    $escaped = str_replace(['\\', '"', '+', '-', '&&', '||', '!', '(', ')', '{', '}', '[', ']', '^', '~', '*', '?', ':'], ['\\\\', '\\"', '\\+', '\\-', '\\&&', '\\||', '\\!', '\\(', '\\)', '\\{', '\\}', '\\[', '\\]', '\\^', '\\~', '\\*', '\\?', '\\:'], $t);
+                    
+                    // Use query_string which handles phrase searches and wildcards
+                    // This will find the technology as a substring in the comma-separated list
                     $shouldTech[] = [
-                        'multi_match' => [
-                            'query' => $t,
-                            'type' => 'phrase',
-                            'fields' => array_map(fn($f) => $f . '^2', $rawFields),
+                        'query_string' => [
+                            'query' => '"' . $escaped . '"',
+                            'fields' => [$field],
+                            'default_operator' => 'AND',
+                            'analyze_wildcard' => true
                         ]
                     ];
                 }
@@ -695,22 +1116,22 @@ class SearchService
             }
 
             if ($excludeRaw) {
-                $excludeNorm = RecordNormalizer::normalizeTechnologies($excludeRaw);
-                if ($excludeNorm) {
-                    $mustNot[] = ['terms' => [$field => $excludeNorm]];
-                }
-
+                // Exclude companies that have any of the excluded technologies
                 foreach ($excludeRaw as $t) {
+                    $escaped = str_replace(['\\', '"', '+', '-', '&&', '||', '!', '(', ')', '{', '}', '[', ']', '^', '~', '*', '?', ':'], ['\\\\', '\\"', '\\+', '\\-', '\\&&', '\\||', '\\!', '\\(', '\\)', '\\{', '\\}', '\\[', '\\]', '\\^', '\\~', '\\*', '\\?', '\\:'], $t);
+                    
                     $mustNot[] = [
-                        'multi_match' => [
-                            'query' => $t,
-                            'type' => 'phrase',
-                            'fields' => $rawFields,
+                        'query_string' => [
+                            'query' => '"' . $escaped . '"',
+                            'fields' => [$field],
+                            'default_operator' => 'AND',
+                            'analyze_wildcard' => true
                         ]
                     ];
                 }
             }
         }
+        */
 
         if (!empty($filters['domains'])) {
             $dom = $filters['domains'];
@@ -1245,6 +1666,14 @@ class SearchService
             'filter' => $filterClauses,
         ];
 
+        Log::info('applyFilters: END - Applying clauses to builder', [
+            'type' => $type,
+            'must_count' => count($must),
+            'mustNot_count' => count($mustNot),
+            'filter_count' => count($filterClauses),
+            'total_clauses' => count($must) + count($mustNot) + count($filterClauses),
+        ]);
+
         foreach ($must as $clause) {
             $builder->must($clause);
         }
@@ -1254,6 +1683,8 @@ class SearchService
         foreach ($filterClauses as $clause) {
             $builder->filter($clause);
         }
+        
+        Log::info('applyFilters: COMPLETE - All clauses applied');
     }
 
     /**
@@ -1392,7 +1823,7 @@ class SearchService
         return [
             'industries' => ['terms' => ['field' => 'company_obj.industry', 'size' => 50]],
             'countries' => ['terms' => ['field' => 'company_obj.location.country', 'size' => 50]],
-            'technologies' => ['terms' => ['field' => 'company_obj.technologies', 'size' => 50]],
+            'technologies' => ['terms' => ['field' => 'company_obj.company_technologies', 'size' => 50]],
             'headcount' => ['histogram' => ['field' => 'company_obj.employee_count', 'interval' => 100]],
             'revenue' => ['histogram' => ['field' => 'company_obj.annual_revenue_usd', 'interval' => 1000000]],
         ];
@@ -1443,8 +1874,8 @@ class SearchService
 
             $aggs['technologies'] = [
                 'terms' => [
-                    'field' => 'technologies',
-                    'size' => 20,
+                    'field' => 'company_technologies',
+                    'size' => 50,
                     'min_doc_count' => 1,
                 ],
             ];
@@ -1521,6 +1952,65 @@ class SearchService
 
     protected function formatResults(array $results, string $type, array $filterDsl = []): array
     {
+        // DEBUG: Log if technologies filter is present
+        if (!empty($filterDsl) && (isset($filterDsl[$type]) || isset($filterDsl['technologies']))) {
+            Log::debug('formatResults() processing technologies filter', [
+                'type' => $type,
+                'has_type_bucket' => isset($filterDsl[$type]),
+                'filter_dsl_keys' => array_keys($filterDsl),
+                'type_bucket_keys' => isset($filterDsl[$type]) ? array_keys($filterDsl[$type]) : [],
+                'technologies_filter' => $filterDsl[$type]['technologies'] ?? $filterDsl['technologies'] ?? null,
+            ]);
+        }
+        
+        // NOTE: POST-FILTER for technologies - applied here because field is not indexed in Elasticsearch
+        // Check both $filterDsl[$type]['technologies'] and $filterDsl['technologies']
+        $techFilter = $filterDsl[$type]['technologies'] ?? $filterDsl['technologies'] ?? null;
+        
+        if (!empty($techFilter) && is_array($techFilter)) {
+            $includeRaw = array_filter(array_map('trim', (array) ($techFilter['include'] ?? [])), 'strlen');
+            $excludeRaw = array_filter(array_map('trim', (array) ($techFilter['exclude'] ?? [])), 'strlen');
+            
+            Log::debug('Applying technologies post-filter', [
+                'include' => $includeRaw,
+                'exclude' => $excludeRaw,
+                'initial_results_count' => count($results['data'] ?? []),
+            ]);
+            
+            if (!empty($includeRaw) || !empty($excludeRaw)) {
+                $results['data'] = array_filter($results['data'], function ($item) use ($includeRaw, $excludeRaw) {
+                    $itemTechs = $item['company_technologies'] ?? '';
+                    
+                    // Check excludes first - if item matches exclude, remove it
+                    if (!empty($excludeRaw)) {
+                        foreach ($excludeRaw as $excludeTech) {
+                            if (stripos($itemTechs, $excludeTech) !== false) {
+                                return false;
+                            }
+                        }
+                    }
+                    
+                    // Check includes - if specified, item must match at least one
+                    if (!empty($includeRaw)) {
+                        foreach ($includeRaw as $includeTech) {
+                            if (stripos($itemTechs, $includeTech) !== false) {
+                                return true;
+                            }
+                        }
+                        // No includes matched, filter out this item
+                        return false;
+                    }
+                    
+                    // No filters or passed all filters
+                    return true;
+                });
+                
+                Log::debug('Technologies post-filter applied', [
+                    'final_results_count' => count($results['data'] ?? []),
+                ]);
+            }
+        }
+
         $items = array_map(function ($item) use ($type) {
             $attributes = $item;
             if (isset($attributes['company'])) {
@@ -1675,6 +2165,15 @@ class SearchService
             'has_email' => isset($rawAggs['has_email']['doc_count']) ? (int) $rawAggs['has_email']['doc_count'] : 0,
             'has_phone' => isset($rawAggs['has_phone']['doc_count']) ? (int) $rawAggs['has_phone']['doc_count'] : 0,
         ];
+
+        // Debug: Log final result count
+        if (!empty($filterDsl) && !empty(array_filter($filterDsl))) {
+            Log::debug('formatResults final output', [
+                'type' => $type,
+                'final_item_count' => count($items),
+                'filter_dsl_applied' => array_keys(array_filter($filterDsl)),
+            ]);
+        }
 
         return [
             'data' => $items,
@@ -2074,11 +2573,11 @@ class SearchService
             'industries' => 'business_category',
             'company_technologies' => 'company_technologies',
             'technologies' => 'company_technologies',
-            'company_locations' => 'location',
-            'company_location' => 'location',
+            // Removed company_locations mapping
             'company_headquarters' => 'locations',
-            'company_founded_year' => 'foundedYear',
-            'founded_year' => 'foundedYear',
+            // Use the underscore field names that exist in ES
+            'company_founded_year' => 'founded_year',
+            'founded_year' => 'founded_year',
             'company_domains' => 'domains',
             'company_has' => 'has',
             'company_keywords' => 'company_keywords'
@@ -2197,6 +2696,158 @@ class SearchService
                     }
                     break;
 
+                case 'annual_revenue':
+                    // New filter system: includes are bracket selections with metadata
+                    if (is_array($value) && isset($value['include'])) {
+                        $include = $value['include'] ?? [];
+                        $parseMoney = function ($val) {
+                            $val = strtoupper(str_replace(['$', ',', ' '], '', $val));
+                            $mult = 1;
+                            if (str_ends_with($val, 'M')) {
+                                $mult = 1000000;
+                                $val = substr($val, 0, -1);
+                            } elseif (str_ends_with($val, 'B')) {
+                                $mult = 1000000000;
+                                $val = substr($val, 0, -1);
+                            } elseif (str_ends_with($val, 'K')) {
+                                $mult = 1000;
+                                $val = substr($val, 0, -1);
+                            }
+                            return is_numeric($val) ? ((float) $val) * $mult : null;
+                        };
+
+                        $should = [];
+                        foreach ($include as $bucket) {
+                            $min = null;
+                            $max = null;
+                            if (str_contains($bucket, '+')) {
+                                $parts = explode('+', $bucket);
+                                $min = $parseMoney($parts[0]);
+                            } elseif (str_contains($bucket, '-')) {
+                                $parts = explode('-', $bucket);
+                                $min = $parseMoney($parts[0]);
+                                $max = $parseMoney($parts[1] ?? '');
+                            } else {
+                                $min = $parseMoney($bucket);
+                                $max = $min;
+                            }
+
+                            $r = [];
+                            if ($min !== null)
+                                $r['gte'] = $min;
+                            if ($max !== null)
+                                $r['lte'] = $max;
+                            if ($r) {
+                                $should[] = ['range' => ['annual_revenue' => $r]];
+                            }
+                        }
+                        if ($should) {
+                            $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                        }
+                    }
+                    break;
+
+                case 'founded_year':
+                    // Founded year uses bracket selections (e.g., "1976-1990", "before-1950", "2021-present")
+                    if (is_array($value) && isset($value['include'])) {
+                        $include = $value['include'] ?? [];
+                        
+                        $should = [];
+                        foreach ($include as $bucket) {
+                            $bucket = trim($bucket);
+                            $min = null;
+                            $max = null;
+                            
+                            if ($bucket === 'before-1950') {
+                                $max = 1949;
+                            } elseif ($bucket === '1950-1975') {
+                                $min = 1950;
+                                $max = 1975;
+                            } elseif ($bucket === '1976-1990') {
+                                $min = 1976;
+                                $max = 1990;
+                            } elseif ($bucket === '1991-2000') {
+                                $min = 1991;
+                                $max = 2000;
+                            } elseif ($bucket === '2001-2010') {
+                                $min = 2001;
+                                $max = 2010;
+                            } elseif ($bucket === '2011-2015') {
+                                $min = 2011;
+                                $max = 2015;
+                            } elseif ($bucket === '2016-2020') {
+                                $min = 2016;
+                                $max = 2020;
+                            } elseif ($bucket === '2021-present') {
+                                $min = 2021;
+                            }
+
+                            $r = [];
+                            if ($min !== null)
+                                $r['gte'] = $min;
+                            if ($max !== null)
+                                $r['lte'] = $max;
+                            if ($r) {
+                                $should[] = ['range' => ['founded_year' => $r]];
+                            }
+                        }
+                        if ($should) {
+                            $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                        }
+                    }
+                    break;
+
+                case 'total_funding':
+                    // Total funding uses money format like annual_revenue
+                    if (is_array($value) && isset($value['include'])) {
+                        $include = $value['include'] ?? [];
+                        $parseMoney = function ($val) {
+                            $val = strtoupper(str_replace(['$', ',', ' '], '', $val));
+                            $mult = 1;
+                            if (str_ends_with($val, 'M')) {
+                                $mult = 1000000;
+                                $val = substr($val, 0, -1);
+                            } elseif (str_ends_with($val, 'B')) {
+                                $mult = 1000000000;
+                                $val = substr($val, 0, -1);
+                            } elseif (str_ends_with($val, 'K')) {
+                                $mult = 1000;
+                                $val = substr($val, 0, -1);
+                            }
+                            return is_numeric($val) ? ((float) $val) * $mult : null;
+                        };
+
+                        $should = [];
+                        foreach ($include as $bucket) {
+                            $min = null;
+                            $max = null;
+                            if (str_contains($bucket, '+')) {
+                                $parts = explode('+', $bucket);
+                                $min = $parseMoney($parts[0]);
+                            } elseif (str_contains($bucket, '-')) {
+                                $parts = explode('-', $bucket);
+                                $min = $parseMoney($parts[0]);
+                                $max = $parseMoney($parts[1] ?? '');
+                            } else {
+                                $min = $parseMoney($bucket);
+                                $max = $min;
+                            }
+
+                            $r = [];
+                            if ($min !== null)
+                                $r['gte'] = $min;
+                            if ($max !== null)
+                                $r['lte'] = $max;
+                            if ($r) {
+                                $should[] = ['range' => ['total_funding_usd' => $r]];
+                            }
+                        }
+                        if ($should) {
+                            $filterClauses[] = ['bool' => ['should' => $should, 'minimum_should_match' => 1]];
+                        }
+                    }
+                    break;
+
                 case 'industries':
                     if (is_array($value)) {
                         $include = $value['include'] ?? [];
@@ -2219,6 +2870,9 @@ class SearchService
                     }
                     break;
 
+                // SKIP: technologies filter is applied post-search at application level
+                // since 'company_technologies' field is not indexed in Elasticsearch
+                /*
                 case 'technologies':
                     if (is_array($value)) {
                         $includeRaw = $value['include'] ?? [];
@@ -2261,7 +2915,7 @@ class SearchService
                             }
                         }
                     }
-                    break;
+                */
 
                 
 

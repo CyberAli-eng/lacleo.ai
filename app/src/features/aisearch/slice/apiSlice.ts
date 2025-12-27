@@ -58,7 +58,7 @@ export const aiSearchApiSlice = apiSlice.injectEndpoints({
             "company.domain": "Company Domain",
             title: "Job Title",
             departments: "Department",
-            "location.country": "Company Location",
+            // Removed Company Location
             technologies: "Technologies"
           }
 

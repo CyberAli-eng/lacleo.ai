@@ -121,16 +121,25 @@ export function CompaniesTable() {
     if (Object.keys(filterDsl.company).length > 0 || Object.keys(filterDsl.contact).length > 0) {
       console.log("❄️ Built DSL:", JSON.stringify(filterDsl, null, 2))
       console.log("❄️ Selected Filters Redux:", selectedFilters)
+      console.log("❄️ Active Filters:", activeFilters)
     }
-  }, [filterDsl, selectedFilters])
+  }, [filterDsl, selectedFilters, activeFilters])
 
   const queryParams = useMemo(
-    () => ({
-      // Only include search term if it is valid (>= 2 chars) to avoid 422 errors
-      ...(debouncedQueryValue && debouncedQueryValue.length >= 2 && { searchTerm: debouncedQueryValue }),
-      ...(semanticQuery && { semantic_query: semanticQuery }),
-      ...(Object.keys(filterDsl).length > 0 && { filter_dsl: filterDsl })
-    }),
+    () => {
+      const params = {
+        // Only include search term if it is valid (>= 2 chars) to avoid 422 errors
+        ...(debouncedQueryValue && debouncedQueryValue.length >= 2 && { searchTerm: debouncedQueryValue }),
+        ...(semanticQuery && { semantic_query: semanticQuery }),
+        ...(Object.keys(filterDsl).length > 0 && { filter_dsl: filterDsl })
+      }
+      
+      if (Object.keys(filterDsl).length > 0) {
+        console.log("📦 queryParams with filter_dsl:", params)
+      }
+      
+      return params
+    },
     [debouncedQueryValue, semanticQuery, filterDsl]
   )
 
@@ -145,8 +154,10 @@ export function CompaniesTable() {
 
   const searchUrl = useMemo(() => {
     const url = buildSearchUrl(searchParams, queryParams)
+    console.log("📍 Search URL updated:", url)
+    console.log("📦 QueryParams being sent:", queryParams)
     if (Object.keys(filterDsl.company).length > 0 || Object.keys(filterDsl.contact).length > 0) {
-      console.log("❄️ Encoded Search URL:", url)
+      console.log("❄️ Filter DSL in URL:", url)
     }
     return url
   }, [searchParams, queryParams, filterDsl])
@@ -366,12 +377,14 @@ export function CompaniesTable() {
 
   useEffect(() => {
     if (data?.meta) {
+      const totalCompanies = data.meta.total || 0
+      console.log('Total Companies Fetched:', totalCompanies)
       setPagination((prev) => ({
         ...prev,
-        total: data.meta.total || 0,
+        total: totalCompanies,
         lastPage: data.meta.last_page || 1
       }))
-      dispatch(setLastResultCount(data.meta.total || 0))
+      dispatch(setLastResultCount(totalCompanies))
     }
   }, [data?.meta, dispatch])
 
@@ -384,6 +397,11 @@ export function CompaniesTable() {
     // <Card className="h-full border-gray-200 bg-white backdrop-blur-sm dark:border-gray-800 dark:bg-gray-950">
     <CardContent className="h-full   ">
       <div className="flex h-full flex-col">
+        {/* Show total companies count */}
+        <div className="mb-3 text-sm font-semibold text-gray-700">
+          Total Companies: <span className="text-blue-600">{pagination.total.toLocaleString()}</span>
+        </div>
+        
         {/* NEW: Show selected count */}
         {selectedCompanies.length > 0 && (
           <div className="mb-4 flex items-center gap-2">

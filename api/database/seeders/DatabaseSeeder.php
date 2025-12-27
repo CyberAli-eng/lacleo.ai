@@ -14,6 +14,10 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             FilterSystemSeeder::class,
+            EmployeeCountFilterValuesSeeder::class,
+            AnnualRevenueFilterValuesSeeder::class,
+            FoundedYearFilterValuesSeeder::class,
+            TotalFundingFilterValuesSeeder::class,
         ]);
     }
 }
