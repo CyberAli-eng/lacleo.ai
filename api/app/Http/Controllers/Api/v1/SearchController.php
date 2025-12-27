@@ -48,7 +48,7 @@ class SearchController extends Controller
                 })
                 : $this->executeSearch($searchParams);
             Log::debug('Search executed successfully', [
-                'total_results' => $results['total'] ?? 0,
+                'total_results' => $results['meta']['total'] ?? 0,
                 'page' => $searchParams['queryParams']['page'] ?? 1,
             ]);
             $debugFlag = $request->query('debug');
@@ -215,6 +215,22 @@ class SearchController extends Controller
         // Ensure filter_dsl is always an array
         if (!isset($searchParams['variables']['filter_dsl']) || !is_array($searchParams['variables']['filter_dsl'])) {
             $searchParams['variables']['filter_dsl'] = [];
+        }
+
+        // If company/contact filters came from Voyager parsing, consolidate them into filter_dsl
+        if (empty($searchParams['variables']['filter_dsl'])) {
+            $consolidated = [];
+            if (isset($searchParams['variables']['company']) && is_array($searchParams['variables']['company']) && !empty($searchParams['variables']['company'])) {
+                $consolidated['company'] = $searchParams['variables']['company'];
+                unset($searchParams['variables']['company']);
+            }
+            if (isset($searchParams['variables']['contact']) && is_array($searchParams['variables']['contact']) && !empty($searchParams['variables']['contact'])) {
+                $consolidated['contact'] = $searchParams['variables']['contact'];
+                unset($searchParams['variables']['contact']);
+            }
+            if (!empty($consolidated)) {
+                $searchParams['variables']['filter_dsl'] = $consolidated;
+            }
         }
 
         // Normalize empty search term to null (not empty string)

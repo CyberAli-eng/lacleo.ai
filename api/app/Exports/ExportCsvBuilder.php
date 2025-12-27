@@ -359,12 +359,6 @@ class ExportCsvBuilder
             'company_facebook_url',
             'company_twitter_url',
             'company_phone',
-            'company_location_street',
-            'company_location_city',
-            'company_location_state',
-            'company_location_country',
-            'company_location_postal_code',
-            'company_location_formatted',
             'company_founded_year',
             'company_technologies',
             'company_keywords',
@@ -380,8 +374,7 @@ class ExportCsvBuilder
         }
 
         foreach ($contactsNorm as $c) {
-            // Extract company location sub-fields if they exist
-            $companyLocation = $c['company_location'] ?? $c['location'] ?? [];
+            // Removed company location sub-fields extraction
             
             // Handle emails - only include if email field is selected, otherwise empty
             $email = '';

@@ -149,11 +149,13 @@ export const Filters = () => {
 
   // Helper to get options
   const getOptionsForSection = (section: "employeeCount" | "companyRevenue" | "annualRevenue" | "foundedYear" | "totalFunding") => {
-    if (section === "employeeCount") return ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10000+"]
-    if (section === "companyRevenue") return ["0-1M", "1M-10M", "10M-50M", "50M-100M", "100M-250M", "250M-500M", "500M-1B", "1B-10B", "10B+"]
-    if (section === "annualRevenue") return ["0-1M", "1M-10M", "10M-50M", "50M-100M", "100M-250M", "250M-500M", "500M-1B", "1B-10B", "10B+"]
-    if (section === "totalFunding") return ["0-1M", "1M-10M", "10M-50M", "50M-100M", "100M-500M", "500M-1B", "1B+"]
-    if (section === "foundedYear") return ["Before 1950", "1950-1970", "1970-1990", "1990-2000", "2000-2010", "2010-2015", "2015-2020", "2020+"]
+    // Keep UI option ids in sync with backend seeded FilterValue.value_id values
+    if (section === "employeeCount") return ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"]
+    if (section === "companyRevenue") return ["0-1M", "1M-10M", "10M-50M", "50M-100M", "100M-500M", "500M-1B", "1B+"]
+    if (section === "annualRevenue") return ["0-1M", "1M-10M", "10M-50M", "50M-100M", "100M-500M", "500M-1B", "1B+"]
+    if (section === "totalFunding") return ["0-100K", "100K-1M", "1M-10M", "10M-50M", "50M-100M", "100M-500M", "500M+"]
+    if (section === "foundedYear")
+      return ["before-1950", "1950-1975", "1976-1990", "1991-2000", "2001-2010", "2011-2015", "2016-2020", "2021-present"]
     return []
   }
 
@@ -262,7 +264,6 @@ export const Filters = () => {
             annual_revenue: 7,
             founded_year: 8,
             total_funding: 9,
-            company_location: 10,
             company_headquarters: 10,
             company_country: 11,
             company_state: 12,

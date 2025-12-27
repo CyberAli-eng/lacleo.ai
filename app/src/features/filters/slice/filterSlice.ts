@@ -50,7 +50,6 @@ export const sectionToKey: Record<string, string> = {
   company_technologies: "technologies",
   technologies: "technologies",
   company_headquarters: "locations",
-  company_location: "locations",
   company_country: "country",
   company_state: "state",
   company_city: "city",
@@ -178,12 +177,12 @@ const filterSlice = createSlice({
         "total_funding",
         "company_industries",
         "company_technologies",
+        "technologies",  // Also clear "technologies" since it's a company filter
         "company_headquarters",
         "company_founded_year",
         "company_domain",
         "company_has_email",
         "company_has_phone",
-        "company_location",
         "company_country",
         "company_state",
         "company_city"

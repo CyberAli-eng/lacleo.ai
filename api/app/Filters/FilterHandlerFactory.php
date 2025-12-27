@@ -7,6 +7,7 @@ use App\Filters\Handlers\DirectInputFilterHandler;
 use App\Filters\Handlers\ElasticsearchFilterHandler;
 use App\Filters\Handlers\LocationFilterHandler;
 use App\Filters\Handlers\PredefinedFilterHandler;
+use App\Filters\Handlers\TechnologiesFilterHandler;
 use App\Models\Filter;
 use InvalidArgumentException;
 
@@ -14,6 +15,11 @@ class FilterHandlerFactory
 {
     public function make(Filter $filter): FilterHandlerInterface
     {
+        // Use custom handler for technologies filter
+        if ($filter->filter_id === 'technologies') {
+            return new TechnologiesFilterHandler($filter);
+        }
+
         return match ($filter->value_source) {
             'direct' => new DirectInputFilterHandler($filter),
             'predefined' => new PredefinedFilterHandler($filter),

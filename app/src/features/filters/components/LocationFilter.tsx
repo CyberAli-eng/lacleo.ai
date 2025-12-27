@@ -70,16 +70,16 @@ export const LocationFilter: React.FC<LocationFilterProps> = ({ scope }) => {
 
   const sectionIds =
     scope === "company"
-      ? { root: "company_location" }
+      ? { root: "", country: "", state: "", city: "" }
       : { root: "contact_location", country: "contact_country", state: "contact_state", city: "contact_city" }
 
-  const countrySelected = selectedItems[sectionIds.country || ""] || []
-  const stateSelected = selectedItems[sectionIds.state || ""] || []
-  const citySelected = selectedItems[sectionIds.city || ""] || []
+  const countrySelected = selectedItems[sectionIds.country] || []
+  const stateSelected = selectedItems[sectionIds.state] || []
+  const citySelected = selectedItems[sectionIds.city] || []
   const companySelected = selectedItems[sectionIds.root] || []
 
   const countryFilter: IFilter = {
-    id: sectionIds.country || sectionIds.root,
+    id: sectionIds.country,
     name: "Country",
     filter_type: scope,
     is_searchable: true,
@@ -88,7 +88,7 @@ export const LocationFilter: React.FC<LocationFilterProps> = ({ scope }) => {
     input_type: "multi_select"
   }
   const stateFilter: IFilter = {
-    id: sectionIds.state || sectionIds.root,
+    id: sectionIds.state,
     name: "State / Region",
     filter_type: scope,
     is_searchable: true,
@@ -97,7 +97,7 @@ export const LocationFilter: React.FC<LocationFilterProps> = ({ scope }) => {
     input_type: "multi_select"
   }
   const cityFilter: IFilter = {
-    id: sectionIds.city || sectionIds.root,
+    id: sectionIds.city,
     name: "City",
     filter_type: scope,
     is_searchable: true,
@@ -241,7 +241,7 @@ export const LocationFilter: React.FC<LocationFilterProps> = ({ scope }) => {
 
   return (
     <div className="flex flex-col gap-6 p-2">
-      <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">{scope === "company" ? "Company Location" : "Contact Location"}</h3>
+      <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">{scope === "company" ? null : "Contact Location"}</h3>
 
       <PresenceRadios scope={scope} presence={presence} onChange={onPresenceChange} />
 

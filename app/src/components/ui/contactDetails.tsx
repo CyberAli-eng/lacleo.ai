@@ -217,7 +217,7 @@ const ContactDetails = () => {
   const twitterUrl = currentCompany?.twitter_url || socialMedia.twitter_url
   const facebookUrl = currentCompany?.facebook_url || socialMedia.facebook_url
 
-  // Company location (from your data structure)
+  // ...existing code...
   const companyStreet = currentCompany?.street || (currentCompany?.location as { street?: string })?.street
   const companyCity = currentCompany?.city || (currentCompany?.location as { city?: string })?.city
   const companyState = currentCompany?.state || (currentCompany?.location as { state?: string })?.state
@@ -924,7 +924,7 @@ const ContactDetails = () => {
                 <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-rose-50 to-white px-5 py-4">
                   <CardTitle className="flex items-center gap-2">
                     <MapPin className="size-5 text-rose-600" />
-                    <span className="font-bold text-gray-900">Company Location</span>
+                    {/* Removed Company Location */}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3 px-5 py-4">

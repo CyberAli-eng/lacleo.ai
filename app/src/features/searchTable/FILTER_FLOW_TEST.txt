@@ -1,0 +1,29 @@
+// Test to verify the filter flow
+// This logs what filter DSL is being built and sent
+
+// In companiesTable.tsx, the filterDsl is built with buildSearchQuery
+// It should look like:
+// {
+//   company: {
+//     technologies: {
+//       include: ["Microsoft Office 365"]
+//     }
+//   },
+//   contact: {}
+// }
+
+// The queryParams should include:
+// {
+//   filter_dsl: {...} // above object
+// }
+
+// The searchUrl should encode this as a query parameter
+// Check console logs for "❄️ Built DSL:" to see what's being sent
+
+console.log("Filter flow verification:")
+console.log("1. Technologies filter in filterSection.tsx is mapped to filter ID 'technologies'")
+console.log("2. buildSearchQuery.ts maps 'technologies' → 'technologies' in company bucket")
+console.log("3. companiesTable.tsx adds filter_dsl to queryParams")
+console.log("4. SearchUrl encodes filter_dsl as URL parameter")
+console.log("5. SearchController.search receives filter_dsl and passes to SearchService")
+console.log("6. SearchService.search applies post-search filtering in formatResults()")

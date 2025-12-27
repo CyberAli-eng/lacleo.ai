@@ -56,14 +56,16 @@ export const TechnologyFilter = () => {
         dispatch(
           addSelectedItem({
             sectionId,
-            item: { id: itemId, name: part, type: mode }
+            item: { id: itemId, name: part, type: mode },
+            isCompanyFilter: true  // Mark as company filter
           })
         )
       } else if (existing.type !== mode) {
         dispatch(
           addSelectedItem({
             sectionId,
-            item: { ...existing, type: mode }
+            item: { ...existing, type: mode },
+            isCompanyFilter: true  // Mark as company filter
           })
         )
       }
@@ -85,12 +87,15 @@ export const TechnologyFilter = () => {
     const existing = selectedItems.find((i) => i.id === itemId || i.name === item.name)
 
     if (existing) {
-      dispatch(removeSelectedItem({ sectionId, itemId: existing.id }))
+      console.log(`🔧 Removing technology filter: ${existing.name}`)
+      dispatch(removeSelectedItem({ sectionId, itemId: existing.id, isCompanyFilter: true }))
     } else {
+      console.log(`🔧 Adding technology filter: ${item.name} (mode: ${filterMode})`)
       dispatch(
         addSelectedItem({
           sectionId,
-          item: { id: itemId, name: item.name, type: filterMode }
+          item: { id: itemId, name: item.name, type: filterMode },
+          isCompanyFilter: true  // Mark as company filter
         })
       )
     }
