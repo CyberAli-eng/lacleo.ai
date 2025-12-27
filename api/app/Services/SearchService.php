@@ -23,7 +23,7 @@ class SearchService
 
     public function __construct(
         protected FilterManager $filterManager,
-        protected EmbeddingService $embeddingService
+        protected ?EmbeddingService $embeddingService = null
     ) {
     }
 
@@ -88,8 +88,8 @@ class SearchService
                 // We still want to respect perPage
             }
 
-            // Apply Semantic Search (Vector) if present
-            if ($semanticQuery) {
+            // Apply Semantic Search (Vector) if present and embedding service available
+            if ($semanticQuery && $this->embeddingService) {
                 try {
                     $vector = $this->embeddingService->generate($semanticQuery);
 
@@ -698,6 +698,7 @@ class SearchService
 
             // End locations block
         }
+        
 
         // Employee Count (Range)
         if (!empty($filters['employee_count']) && is_array($filters['employee_count'])) {
@@ -1792,8 +1793,6 @@ class SearchService
             'annual_revenue_usd' => 'company_obj.annual_revenue_usd',
             'industry' => 'company_obj.industry',
             'technologies' => 'company_obj.technologies',
-            'country' => 'company_obj.location.country',
-            'city' => 'company_obj.location.city',
             'has_email' => 'emails.email',
             'has_phone' => 'phone_numbers.phone_number',
         ];
@@ -1871,13 +1870,7 @@ class SearchService
                 ],
             ];
 
-            $aggs['locations'] = [
-                'terms' => [
-                    'field' => 'location.country',
-                    'size' => 20,
-                    'min_doc_count' => 1,
-                ],
-            ];
+            
 
             $aggs['technologies'] = [
                 'terms' => [
@@ -1920,13 +1913,7 @@ class SearchService
                 ],
             ];
 
-            $aggs['locations'] = [
-                'terms' => [
-                    'field' => 'location.country',
-                    'size' => 20,
-                    'min_doc_count' => 1,
-                ],
-            ];
+            
 
             $aggs['technologies'] = [
                 'terms' => [
@@ -2174,7 +2161,6 @@ class SearchService
         $formattedAggs = [
             'industries' => $this->mergeTermAggs($indsPrimary, $indsFallback),
             'employee_brackets' => $this->formatRangeAggregation($rawAggs['employee_brackets'] ?? null),
-            'locations' => $this->formatTermsAggregation($rawAggs['locations'] ?? null),
             'technologies' => $this->formatTermsAggregation($rawAggs['technologies'] ?? null),
             'has_email' => isset($rawAggs['has_email']['doc_count']) ? (int) $rawAggs['has_email']['doc_count'] : 0,
             'has_phone' => isset($rawAggs['has_phone']['doc_count']) ? (int) $rawAggs['has_phone']['doc_count'] : 0,
@@ -2258,39 +2244,7 @@ class SearchService
         return $out;
     }
 
-    private function normalizeCountryName(string $country): string
-    {
-        $country = trim($country);
-        if ($country === '') {
-            return $country;
-        }
-        $map = $this->getCountryAbbreviationMap();
-        $upper = strtoupper($country);
-        if (isset($map[$upper])) {
-            return $map[$upper];
-        }
-        // Common aliases
-        $aliases = [
-            'US' => ['usa', 'u.s.', 'u.s.a', 'united states of america', 'america'],
-            'UK' => ['u.k.', 'great britain', 'england', 'gb', 'britain'],
-            'UAE' => ['uae', 'united arab emirates'],
-            'KOREA' => ['south korea', 'republic of korea', 's.korea'],
-        ];
-        foreach ($aliases as $abbr => $list) {
-            foreach ($list as $alias) {
-                if (strcasecmp($country, $alias) === 0) {
-                    return $map[$abbr] ?? $country;
-                }
-            }
-        }
-        // Fallback: try partial match against map values
-        foreach ($map as $abbr => $full) {
-            if (stripos($full, $country) !== false || stripos($country, $full) !== false) {
-                return $full;
-            }
-        }
-        return $country;
-    }
+    
 
     private function expandAbbreviationSynonyms(string $term): array
     {
@@ -2585,72 +2539,7 @@ class SearchService
         ];
     }
 
-    /**
-     * Get country abbreviation to full name mapping
-     */
-    protected function getCountryAbbreviationMap(): array
-    {
-        return [
-            'US' => 'United States',
-            'USA' => 'United States',
-            'UK' => 'United Kingdom',
-            'GB' => 'United Kingdom',
-            'CA' => 'Canada',
-            'AU' => 'Australia',
-            'DE' => 'Germany',
-            'FR' => 'France',
-            'IT' => 'Italy',
-            'ES' => 'Spain',
-            'NL' => 'Netherlands',
-            'BE' => 'Belgium',
-            'CH' => 'Switzerland',
-            'AT' => 'Austria',
-            'SE' => 'Sweden',
-            'NO' => 'Norway',
-            'DK' => 'Denmark',
-            'FI' => 'Finland',
-            'PL' => 'Poland',
-            'IE' => 'Ireland',
-            'PT' => 'Portugal',
-            'GR' => 'Greece',
-            'CZ' => 'Czech Republic',
-            'HU' => 'Hungary',
-            'RO' => 'Romania',
-            'BG' => 'Bulgaria',
-            'HR' => 'Croatia',
-            'SK' => 'Slovakia',
-            'SI' => 'Slovenia',
-            'EE' => 'Estonia',
-            'LV' => 'Latvia',
-            'LT' => 'Lithuania',
-            'JP' => 'Japan',
-            'CN' => 'China',
-            'IN' => 'India',
-            'BR' => 'Brazil',
-            'MX' => 'Mexico',
-            'AR' => 'Argentina',
-            'CL' => 'Chile',
-            'CO' => 'Colombia',
-            'PE' => 'Peru',
-            'ZA' => 'South Africa',
-            'EG' => 'Egypt',
-            'NG' => 'Nigeria',
-            'KE' => 'Kenya',
-            'AE' => 'United Arab Emirates',
-            'SA' => 'Saudi Arabia',
-            'IL' => 'Israel',
-            'TR' => 'Turkey',
-            'RU' => 'Russia',
-            'KR' => 'South Korea',
-            'SG' => 'Singapore',
-            'MY' => 'Malaysia',
-            'TH' => 'Thailand',
-            'VN' => 'Vietnam',
-            'PH' => 'Philippines',
-            'ID' => 'Indonesia',
-            'NZ' => 'New Zealand',
-        ];
-    }
+    
     /**
      * Resolves company filters into a list of matching company domains.
      * This allows "Contact search by Company properties" (Cross-Index Filtering).
@@ -3028,26 +2917,7 @@ class SearchService
                     }
                 */
 
-                case 'locations':
-                case 'location':
-                    if (is_array($value)) {
-                        $include = $value['include'] ?? [];
-
-                        if (!empty($include)) {
-                            // Normalize country names
-                            $normalizedCountries = array_map(fn($c) => $this->normalizeCountryName($c), $include);
-                            $normalizedCountries = array_filter($normalizedCountries);
-                            
-                            if (!empty($normalizedCountries)) {
-                                // Use terms query for exact country matching
-                                $shouldLoc = [
-                                    'terms' => ['location.country' => $normalizedCountries]
-                                ];
-                                $filterClauses[] = $shouldLoc;
-                            }
-                        }
-                    }
-                    break;
+                
 
                 case 'foundedYear':
                     if (is_array($value)) {
