@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom"
 import { AiChatPageProps, Message, SearchCriterion, SearchConfirmationProps } from "./types"
 import LacleoIcon from "../../static/media/avatars/lacleo_avatar.svg?react"
 import LoaderLines from "../../static/media/icons/loader-lines.svg?react"
-import {  
+import {
   applyCriteria,
   finishCriteriaProcessing,
   finishSearch,
@@ -20,7 +20,7 @@ import {
 } from "./slice/searchslice"
 import { useGetFiltersQuery } from "../filters/slice/apiSlice"
 import { useTranslateQueryMutation } from "../searchTable/slice/apiSlice"
-import { addSelectedItem, resetFilters, importFiltersFromDSL } from "../filters/slice/filterSlice"
+import { addSelectedItem, resetFilters, importFiltersFromDSL, importFiltersFromCanonical } from "../filters/slice/filterSlice"
 import { IFilterGroup } from "@/interface/filters/filterGroup"
 import { FILTER_KEYS, FILTER_LABELS } from "../filters/utils/constants"
 
@@ -68,6 +68,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
   const messagesRef = useRef<Message[]>([])
   const lastResultCountRef = useRef<number | null>(typeof lastResultCount === "number" ? lastResultCount : null)
   const processQueryRef = useRef<(q: string, isInitial?: boolean) => void>(() => {})
+  const lastCallRef = useRef<{ q: string | null; t: number }>({ q: null, t: 0 })
 
   const mapBackendFiltersToCriteria = useCallback((filters: Record<string, unknown>, customFilters: BackendCustomItem[] = []): SearchCriterion[] => {
     const out: SearchCriterion[] = []
@@ -113,7 +114,13 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
 
     // Generic handler options
     const HANDLERS: Record<string, (val: unknown) => void> = {
-      [FILTER_KEYS.JOB_TITLE]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.JOB_TITLE, FILTER_LABELS[FILTER_KEYS.JOB_TITLE], x)),
+      [FILTER_KEYS.JOB_TITLE]: (v) => {
+        const values = extractValues(v)
+        if (values.length) {
+          const best = values.sort((a, b) => b.length - a.length)[0]
+          push(FILTER_KEYS.JOB_TITLE, FILTER_LABELS[FILTER_KEYS.JOB_TITLE], best)
+        }
+      },
       [FILTER_KEYS.DEPARTMENTS]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.DEPARTMENTS, FILTER_LABELS[FILTER_KEYS.DEPARTMENTS], x)),
       [FILTER_KEYS.SENIORITY]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.SENIORITY, FILTER_LABELS[FILTER_KEYS.SENIORITY], x)),
       [FILTER_KEYS.COMPANY_NAME]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.COMPANY_NAME, FILTER_LABELS[FILTER_KEYS.COMPANY_NAME], x)),
@@ -266,8 +273,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
                 dispatch(
                   addSelectedItem({
                     sectionId: "company_keywords",
-                    item: { id: c.value, name: c.value, type: "include" },
-                    isCompanyFilter: true
+                    item: { id: c.value, name: c.value, type: "include" }
                   })
                 )
               }
@@ -320,6 +326,9 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
 
   const processQuery = useCallback(
     async (query: string, isInitial = false) => {
+      const now = Date.now()
+      if (lastCallRef.current.q === query && now - lastCallRef.current.t < 1200) return
+      lastCallRef.current = { q: query, t: now }
       if (isProcessingRef.current) return
 
       if (isInitial && lastProcessedInitialQuery.current === query) return
@@ -359,7 +368,82 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
         if (!mountedRef.current) return
 
         const criteria = mapBackendFiltersToCriteria(response.filters, response.custom)
-        setInferredEntity(response.entity)
+        // Deterministic entity detection
+        const filtersObj = (response.filters || {}) as Record<string, unknown>
+        const queryText = String(query || "")
+        const jobTitleSignals =
+          /\b(cto|cfo|vp|chief\s+\w+|engineer|developer|manager|director|lead|architect|ai\s+engineer|data\s+scientist|professional|people)\b/i
+        const hasJobTitleSignal = jobTitleSignals.test(queryText)
+        const hasJobTitleFilter =
+          Object.prototype.hasOwnProperty.call(filtersObj, "job_title") ||
+          Object.prototype.hasOwnProperty.call(filtersObj, "title") ||
+          criteria.some((c) => c.id === FILTER_KEYS.JOB_TITLE)
+        const companyMetricKeys = [
+          "company",
+          "company_names",
+          "company.employee_count",
+          "employee_count",
+          "company_size",
+          "revenue",
+          "annual_revenue",
+          "industry",
+          "industries",
+          "technologies",
+          "company.technologies"
+        ]
+        const metricIds: string[] = [
+          FILTER_KEYS.COMPANY_NAME,
+          FILTER_KEYS.EMPLOYEE_COUNT,
+          FILTER_KEYS.REVENUE,
+          FILTER_KEYS.INDUSTRY,
+          FILTER_KEYS.TECHNOLOGIES
+        ]
+        const hasCompanyMetrics =
+          companyMetricKeys.some((k) => Object.prototype.hasOwnProperty.call(filtersObj, k)) || criteria.some((c) => metricIds.includes(c.id))
+
+        const computedEntity: "contacts" | "companies" =
+          hasJobTitleSignal || hasJobTitleFilter ? "contacts" : hasCompanyMetrics ? "companies" : "contacts"
+        setInferredEntity(computedEntity)
+        // If backend returned canonical DSL with contact/company, import directly and navigate
+        const canonicalFilters = (response.filters || {}) as { contact?: Record<string, unknown>; company?: Record<string, unknown> }
+        const hasCanonicalShape = canonicalFilters && (canonicalFilters.contact !== undefined || canonicalFilters.company !== undefined)
+        const hasAnyCanonicalValues = (() => {
+          const buckets = [canonicalFilters.contact || {}, canonicalFilters.company || {}]
+          for (const b of buckets) {
+            for (const v of Object.values(b)) {
+              const entry = v as {
+                include?: unknown[]
+                exclude?: unknown[]
+                range?: { min?: number; max?: number }
+                presence?: string
+                operator?: string
+              }
+              const nonEmpty =
+                (Array.isArray(entry?.include) && entry!.include!.length > 0) ||
+                (Array.isArray(entry?.exclude) && entry!.exclude!.length > 0) ||
+                (entry?.range && (entry.range.min !== undefined || entry.range.max !== undefined)) ||
+                !!entry?.presence ||
+                !!entry?.operator
+              if (nonEmpty) return true
+            }
+          }
+          return false
+        })()
+        if (hasCanonicalShape && hasAnyCanonicalValues) {
+          dispatch(startSearch(query))
+          dispatch(resetFilters())
+          const contact = (canonicalFilters.contact || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
+          const company = (canonicalFilters.company || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
+          dispatch(importFiltersFromCanonical({ contact, company }))
+          dispatch(applyCriteria([]))
+          if (computedEntity === "contacts") {
+            navigate("/app/search/contacts", { state: { fromAi: true } })
+          } else {
+            navigate("/app/search/companies", { state: { fromAi: true } })
+          }
+          dispatch(finishSearch())
+          return
+        }
         setCurrentCriteria(criteria)
 
         const dsl: { contact: Record<string, unknown>; company: Record<string, unknown> } = { contact: {}, company: {} }
@@ -392,7 +476,11 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
         for (const [key, val] of Object.entries(response.filters as Record<string, unknown>)) {
           if (!val) continue
           if (key === "title" || key === "job_title") {
-            ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "job_title", String(v)))
+            const vals = (Array.isArray(val) ? val : [val]).map((v) => String(v)).filter(Boolean)
+            if (vals.length) {
+              const best = vals.sort((a, b) => b.length - a.length)[0]
+              ensureInclude(dsl.contact, "job_title", best)
+            }
           } else if (key === "departments") {
             ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "departments", String(v)))
           } else if (key === "seniority") {
@@ -453,7 +541,7 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
           } else if (key === "company_keywords") {
             ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "company_keywords", String(v)))
           } else if (key === "company_names" || key === "company") {
-            // ...
+            ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "company_names", String(v)))
           }
         }
 
@@ -519,10 +607,11 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
         if (mountedRef.current) {
           setIsLoading(false)
         }
+        lastCallRef.current = { q: null, t: 0 }
         isProcessingRef.current = false
       }
     },
-    [addMessage, translateQuery, mapBackendFiltersToCriteria, handleApplySearch, handleCriterionChange, dispatch]
+    [addMessage, translateQuery, mapBackendFiltersToCriteria, handleApplySearch, handleCriterionChange, dispatch, navigate]
   )
 
   // Keep ref in sync with latest processQuery
@@ -554,20 +643,19 @@ const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery, onBackToHome }) =
     }
   }, [initialQuery])
 
- const handleNewSearch = useCallback(
-  (query: string) => {
-    disablePreviousConfirmations()
+  const handleNewSearch = useCallback(
+    (query: string) => {
+      disablePreviousConfirmations()
 
-    if (lastProcessedInitialQuery.current && lastProcessedInitialQuery.current === query) {
-      return
-    }
+      if (lastProcessedInitialQuery.current && lastProcessedInitialQuery.current === query) {
+        return
+      }
 
-    isProcessingRef.current = false
-    processQuery(query, false)
-  },
-  [processQuery, disablePreviousConfirmations]
-)
-
+      isProcessingRef.current = false
+      processQuery(query, false)
+    },
+    [processQuery, disablePreviousConfirmations]
+  )
 
   return (
     <div className="flex h-full flex-1 flex-col">

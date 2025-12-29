@@ -11,6 +11,9 @@ class UserController extends Controller
     public function getUser(Request $request)
     {
         $user = $request->user();
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
 
         return new UserResource($user);
     }

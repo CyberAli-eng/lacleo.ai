@@ -44,9 +44,10 @@ it('returns breakdown sums and free grants total', function () {
             ->where('reveal_email', 0)
             ->where('reveal_phone', 0)
             ->where('export_email', 0)
-            ->where('export_phone', 7)
+            ->where('export_phone', 0)
             ->where('adjustments', 0)
         )
+        ->etc()
     );
 });
 

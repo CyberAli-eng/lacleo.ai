@@ -16,7 +16,7 @@ function csvToRows(string $csv): array
     return $rows;
 }
 
-it('companies without contacts produce one row with empty contact fields', function () {
+it('companies without contacts produce one row with company-only fields', function () {
     $company = RecordNormalizer::normalizeCompany([
         'name' => 'Acme Corp',
         'website' => 'acme.com',
@@ -28,11 +28,12 @@ it('companies without contacts produce one row with empty contact fields', funct
     $rows = csvToRows($csv);
 
     expect($rows)->toHaveCount(2);
-    expect($rows[0])->toEqual(\App\Exports\ExportCsvBuilder::COMPANY_HEADERS_FREE);
-    // domain,first_name,last_name,title,seniority,departments,person_linkedin_url,city,state,country,company_name,number_of_employees,industry,...
+    expect($rows[0][0])->toBe('domain');
+    expect($rows[0][1])->toBe('name');
+    expect($rows[0][2])->toBe('website');
     expect($rows[1][0])->toBe('acme.com');
-    expect($rows[1][10])->toBe('Acme Corp');
-    expect($rows[1][12])->toBe('Software');
+    expect($rows[1][1])->toBe('Acme Corp');
+    expect($rows[1][4])->toBe('Software');
 });
 
 it('contact rows include normalized email and phone fields', function () {
@@ -50,43 +51,39 @@ it('contact rows include normalized email and phone fields', function () {
     $rows = csvToRows($csv);
 
     expect($rows)->toHaveCount(2);
-    expect($rows[0])->toEqual(\App\Exports\ExportCsvBuilder::CONTACT_HEADERS_PII);
-    // domain,first_name,last_name,title,work_email,personal_email,seniority,departments,mobile_number,direct_number,person_linkedin_url,city,state,country
-    expect($rows[1][0])->toBe('acme.com');
-    expect($rows[1][3])->toBe('Engineer');
+    // first_name,last_name,title,work_email,personal_email,seniority,departments,mobile_number,direct_number,person_linkedin_url,city,state,country,company,website
+    expect($rows[0][0])->toBe('first_name');
+    expect($rows[0][2])->toBe('title');
+    expect($rows[1][2])->toBe('Engineer');
     // emails merged via normalizer; specific fields may be empty
-    expect($rows[1][8])->toBe('+1 555-111-2222');
+    expect($rows[1][7])->toBe('+1 555-111-2222');
 });
 
-it('domain join uses canonical_domain case-insensitively', function () {
+it('companies CSV ignores contact rows and outputs company fields only', function () {
     $company = RecordNormalizer::normalizeCompany([
         'name' => 'Acme Corp',
         'website' => 'acme.com',
     ]);
-    $contactMatch = RecordNormalizer::normalizeContact([
+    $contact = RecordNormalizer::normalizeContact([
         'full_name' => 'John Roe',
         'website' => 'ACME.COM',
         'emails' => ['john@acme.com'],
-        'phone_numbers' => [],
-    ]);
-    $contactNoMatch = RecordNormalizer::normalizeContact([
-        'full_name' => 'Alan Poe',
-        'website' => 'acme.co',
-        'emails' => ['alan@acme.co'],
     ]);
 
-    $csv = ExportCsvBuilder::buildCompaniesCsv([$company], [$contactMatch, $contactNoMatch], false);
+    $csv = ExportCsvBuilder::buildCompaniesCsv([$company], [$contact], false);
     $rows = csvToRows($csv);
 
     expect($rows)->toHaveCount(2);
-    expect($rows[0])->toEqual(\App\Exports\ExportCsvBuilder::COMPANY_HEADERS_PII);
-    // first_name,last_name columns
-    expect($rows[1][1])->toBe('John');
-    expect($rows[1][2])->toBe('Roe');
+    expect($rows[0][0])->toBe('domain');
+    expect($rows[0])->not->toContain('first_name');
+    expect($rows[1][1])->toBe('Acme Corp');
 });
 
-it('contact free header order matches spec', function () {
+it('contact header order matches builder schema', function () {
     $csv = ExportCsvBuilder::buildContactsCsv([], false);
     $rows = csvToRows($csv);
-    expect($rows[0])->toEqual(\App\Exports\ExportCsvBuilder::CONTACT_HEADERS_FREE);
+    expect($rows[0][0])->toBe('first_name');
+    expect($rows[0][2])->toBe('title');
+    expect($rows[0][13])->toBe('company');
+    expect($rows[0][14])->toBe('website');
 });

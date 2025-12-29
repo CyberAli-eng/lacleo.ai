@@ -7,7 +7,16 @@ const filtersApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getFilters: builder.query<IFilterGroup[], void>({
       query: () => ({ url: FILTER.GET_ALL_FILTERS }),
-      transformResponse: (response: { data: IFilterGroup[] }) => response.data,
+      transformResponse: (response: { data: IFilterGroup[] }) => {
+        return (response.data || []).map((group) => ({
+          ...group,
+          filters: (group.filters || []).map((f) => {
+            const appliesTo = (f as unknown as { applies_to?: string[] }).applies_to || ["company"]
+            const filterType = appliesTo.includes("contact") && !appliesTo.includes("company") ? "contact" : "company"
+            return { ...f, filter_type: filterType }
+          })
+        }))
+      },
       transformErrorResponse
     }),
     searchFilterValues: builder.query<IFilterResponse<IFilterValue>, IFilterSearchParams>({

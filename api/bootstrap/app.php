@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Access\AuthorizationException;
 
 $factory = function () {
 return Application::configure(basePath: dirname(__DIR__))
@@ -41,19 +42,23 @@ return Application::configure(basePath: dirname(__DIR__))
                 'ensureRevealFieldAvailable' => \App\Http\Middleware\EnsureRevealFieldAvailable::class,
                 'admin' => \App\Http\Middleware\AdminOnly::class,
                 'ensureWorkspace' => \App\Http\Middleware\EnsureWorkspace::class,
-                'limit.request.size' => \App\Http\Middleware\LimitRequestBodySize::class,
                 'request.timeout' => \App\Http\Middleware\RequestTimeout::class,
                 'csrf.guard' => \App\Http\Middleware\CsrfGuard::class,
-                'attachUserScope' => \App\Http\Middleware\AttachUserWorkspaceHeaders::class,
+                'limit.request.size' => \App\Http\Middleware\LimitRequestBodySize::class,
             ]);
             $middleware->prepend(HandleCors::class);
         })
         ->withExceptions(function (Exceptions $exceptions) {
             $exceptions->renderable(function (AuthenticationException $e, $request) {
+                // Always return JSON for API/Authentication errors to avoid Redirect loop/500
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            });
+
+            $exceptions->renderable(function (AuthorizationException $e, $request) {
                 if ($request->is('api/*') || $request->expectsJson()) {
-                    return response()->json(['message' => 'Unauthenticated.'], 401);
+                    return response()->json(['message' => 'Forbidden.'], 403);
                 }
-                return redirect()->guest('/login');
+                return response()->json(['message' => 'Forbidden.'], 403);
             });
         })->create();
 };

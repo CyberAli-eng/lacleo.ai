@@ -182,7 +182,7 @@ const ContactDetails = () => {
     // Deduplicate by number (remove non-digits for comparison)
     const seen = new Map<string, { number: string; type?: string }>()
     merged.forEach((p) => {
-      const key = p.number.replace(/\D/g, '')
+      const key = p.number.replace(/\D/g, "")
       if (key && !seen.has(key)) {
         seen.set(key, { number: p.number, type: p.type })
       }
@@ -270,7 +270,7 @@ const ContactDetails = () => {
   // Reveal logic
   const handleContactReveal = async (fieldType: "email" | "phone", index?: number) => {
     if (!resolvedContact?._id) return
-    
+
     // Check credits: 1 credit for email, 4 credits for phone
     const requiredCredits = fieldType === "email" ? 1 : 4
     const balance = billingUsage?.balance as number | undefined
@@ -278,7 +278,7 @@ const ContactDetails = () => {
       dispatch(setCreditUsageOpen(true))
       return
     }
-    
+
     const fieldKey = fieldType === "email" ? `contact_email_${index ?? "main"}` : `contact_phone_${index ?? "main"}`
     const requestId = crypto.randomUUID?.() || `${Date.now()}`
     try {
@@ -322,7 +322,7 @@ const ContactDetails = () => {
 
   const handleCompanyReveal = async (fieldType: "email" | "phone", index?: number) => {
     if (!company?._id) return
-    
+
     // Company reveals are free - no credit check needed
     const fieldKey = fieldType === "email" ? `company_email_${index ?? "main"}` : `company_phone_${index ?? "main"}`
 
@@ -725,7 +725,6 @@ const ContactDetails = () => {
                               onClick={() => handleCompanyReveal("phone", idx)}
                             >
                               <div className="flex items-center gap-1">
-                             
                                 <Eye className="size-3.5" />
                               </div>
                             </Button>

@@ -5,7 +5,8 @@ import { CalendarRange, Check, Ellipsis, Play, Trash2, Loader2, Star } from "luc
 import { useGetSavedFiltersQuery, useDeleteSavedFilterMutation, useCreateSavedFilterMutation, useUpdateSavedFilterMutation } from "./slice/apiSlice"
 import { useDispatch } from "react-redux"
 import { useNavigate } from "react-router-dom"
-import { importFiltersFromDSL } from "@/features/filters/slice/filterSlice"
+import { importFiltersFromDSL, importFiltersFromCanonical } from "@/features/filters/slice/filterSlice"
+import type { FilterDSL } from "@/features/filters/adapter/querySerializer"
 import { setView } from "@/interface/searchTable/view"
 import { format } from "date-fns"
 import { SavedFilter } from "@/interface/searchTable/search"
@@ -21,17 +22,41 @@ const SavedFiltersPage = () => {
   const navigate = useNavigate()
   const { toast } = useToast()
 
-  const handleRunSearch = (filter: SavedFilter) => {
-    // Check if filters match expected structure
-    const filters = filter.filters as { contact?: Record<string, unknown>; company?: Record<string, unknown> }
-
-    // Import filters into Redux state
-    dispatch(
-      importFiltersFromDSL({
-        contact: filters.contact || {},
-        company: filters.company || {}
-      })
-    )
+  const handleRunSearch = async (filter: SavedFilter) => {
+    // Support both legacy DSL and new flat queries
+    const payload = filter.filters as unknown
+    if (Array.isArray(payload)) {
+      const dsl: FilterDSL = { contact: {}, company: {} }
+      type LegacyFlatQuery = { id?: string; values?: unknown[]; exclude_values?: unknown[]; range?: { min?: number; max?: number } }
+      for (const q of payload as LegacyFlatQuery[]) {
+        const id = String(q.id || "")
+        const include = Array.isArray(q.values) ? q.values.map(String) : []
+        const exclude = Array.isArray(q.exclude_values) ? q.exclude_values.map(String) : []
+        const range = q.range && (q.range.min !== undefined || q.range.max !== undefined) ? q.range : undefined
+        const isCompany = id.startsWith("company_")
+        const bucket = isCompany ? (dsl.company![id] ||= {}) : (dsl.contact![id] ||= {})
+        if (include.length) bucket.include = include
+        if (exclude.length) bucket.exclude = exclude
+        if (range) bucket.range = { min: range.min, max: range.max }
+      }
+      dispatch(importFiltersFromCanonical(dsl))
+      try {
+        await updateFilter({ id: filter.id, filters: dsl }).unwrap()
+      } catch (err) {
+        /* noop */
+      }
+    } else {
+      const filters = payload as { contact?: Record<string, unknown>; company?: Record<string, unknown> }
+      const contact = (filters.contact || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
+      const company = (filters.company || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
+      const canonical: FilterDSL = { contact, company }
+      dispatch(importFiltersFromCanonical(canonical))
+      try {
+        await updateFilter({ id: filter.id, filters: canonical }).unwrap()
+      } catch (err) {
+        /* noop */
+      }
+    }
 
     // Switch to search view
     dispatch(setView("search"))

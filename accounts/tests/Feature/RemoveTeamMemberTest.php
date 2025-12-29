@@ -12,6 +12,9 @@ class RemoveTeamMemberTest extends TestCase
 
     public function test_team_members_can_be_removed_from_teams(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $user->currentTeam->users()->attach(
@@ -25,6 +28,9 @@ class RemoveTeamMemberTest extends TestCase
 
     public function test_only_team_owner_can_remove_team_members(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $user = User::factory()->withPersonalTeam()->create();
 
         $user->currentTeam->users()->attach(

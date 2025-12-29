@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Services\SearchService;
 use App\Utilities\SearchUrlParser;
 use App\Validators\SearchQueryValidator;
+use App\Services\FilterRegistry;
 use Exception;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -81,8 +82,6 @@ class SearchController extends Controller
         }
     }
 
-
-
     /**
      * List all available filters
      */
@@ -91,9 +90,9 @@ class SearchController extends Controller
         Log::debug('Retrieving all filters');
 
         $filters = $this->filterManager->getActiveFilters()
-            ->groupBy('filter_group_id')
-            ->map(function ($groupFilters) {
-                return $this->formatFilterGroup($groupFilters);
+            ->groupBy('group')
+            ->map(function ($groupFilters, $groupName) {
+                return $this->formatFilterGroup($groupFilters, $groupName);
             })
             ->values()
             ->toArray();
@@ -277,15 +276,15 @@ class SearchController extends Controller
      *
      * @param  \Illuminate\Support\Collection  $groupFilters
      */
-    private function formatFilterGroup($groupFilters): array
+    private function formatFilterGroup($groupFilters, $groupName): array
     {
-        $firstFilter = $groupFilters->first();
-
+        $registry = collect(FilterRegistry::getFilters())->keyBy('id');
         return [
-            'group_id' => $firstFilter->filterGroup->id,
-            'group_name' => $firstFilter->filterGroup->name,
-            'group_description' => $firstFilter->filterGroup->name,
-            'filters' => $groupFilters->map(function ($filter) {
+            'group_id' => \Illuminate\Support\Str::slug($groupName),
+            'group_name' => $groupName,
+            'group_description' => $groupName,
+            'filters' => $groupFilters->map(function ($filter) use ($registry) {
+                $config = $registry->get($filter->filter_id);
                 return [
                     'id' => $filter->filter_id,
                     'name' => $filter->name,
@@ -294,7 +293,17 @@ class SearchController extends Controller
                     'is_searchable' => $filter->is_searchable,
                     'allows_exclusion' => $filter->allows_exclusion,
                     'supports_value_lookup' => $filter->supports_value_lookup,
-                    'filter_type' => $filter->filter_type,
+                    // Server-driven applicability and aggregation
+                    'applies_to' => $config['applies_to'] ?? ['company'],
+                    'aggregation' => $config['aggregation'] ?? ['enabled' => false],
+                    // Maintain UI compatibility for filter_type without heuristics
+                    'filter_type' => (function () use ($config) {
+                        $applies = $config['applies_to'] ?? [];
+                        if (in_array('contact', $applies, true) && !in_array('company', $applies, true)) {
+                            return 'contact';
+                        }
+                        return 'company';
+                    })(),
                 ];
             })->values(),
         ];
@@ -306,7 +315,7 @@ class SearchController extends Controller
     private function validateFilterValuesRequest(Request $request): \Illuminate\Contracts\Validation\Validator
     {
         return Validator::make($request->query(), [
-            'filter' => 'required|string|exists:filters,filter_id',
+            'filter' => 'required|string',
             'q' => 'sometimes|nullable|string|max:100',
             'page' => 'sometimes|nullable|integer|min:1',
             'count' => 'sometimes|nullable|integer|between:1,100',

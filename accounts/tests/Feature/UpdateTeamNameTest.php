@@ -12,6 +12,9 @@ class UpdateTeamNameTest extends TestCase
 
     public function test_team_names_can_be_updated(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $this->put('/teams/'.$user->currentTeam->id, [

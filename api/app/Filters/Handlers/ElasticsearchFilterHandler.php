@@ -6,6 +6,49 @@ use App\Elasticsearch\ElasticQueryBuilder;
 
 class ElasticsearchFilterHandler extends AbstractFilterHandler
 {
+    public function validateValues(array $values): bool
+    {
+        if (empty($values)) {
+            return false;
+        }
+
+        return collect($values)->every(function ($value) {
+            $v = $value['value'] ?? null;
+            if (is_null($v)) {
+                return false;
+            }
+            if (is_numeric($v)) {
+                return true;
+            }
+            if (is_string($v)) {
+                return trim($v) !== '';
+            }
+
+            return false;
+        });
+    }
+
+    /**
+     * Get the appropriate field for the current context or target model
+     */
+    protected function getField(string $context): string
+    {
+        $fields = $this->filter->settings['fields'] ?? [];
+        
+        // Try exact context match
+        if (isset($fields[$context]) && !empty($fields[$context])) {
+            return $fields[$context][0];
+        }
+
+        // Fallback: try to derive context from target model if not provided or found
+        $targetModel = $this->filter->settings['target_model'] ?? null;
+        if ($targetModel === \App\Models\Contact::class) {
+            return $fields['contact'][0] ?? $this->filter->elasticsearch_field ?? '';
+        }
+        
+        return $fields['company'][0] ?? $this->filter->elasticsearch_field ?? '';
+    }
+
     /**
      * Get possible values for this filter
      */
@@ -16,8 +59,14 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
 
         $settings = $this->filter->settings;
         $fieldType = $settings['field_type'] ?? 'text';
+        
+        // Determine field based on target model context
+        $context = ($targetModel === \App\Models\Contact::class) ? 'contact' : 'company';
+        $field = $this->getField($context);
 
-        $searchFields = $settings['search_fields'] ?? [];
+        if (empty($field)) {
+            return $this->emptyPaginatedResponse($page, $perPage);
+        }
 
         if (! empty($search)) {
             if ($fieldType === 'keyword') {
@@ -26,12 +75,12 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
                         'should' => [
                             [
                                 'prefix' => [
-                                    $this->filter->elasticsearch_field => $search,
+                                    $field => $search,
                                 ],
                             ],
                             [
                                 'prefix' => [
-                                    $this->filter->elasticsearch_field.'.lowercase' => strtolower($search),
+                                    $field.'.lowercase' => strtolower($search),
                                 ],
                             ],
                         ],
@@ -54,8 +103,8 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
         $elastic->termsAggregation(
             'distinct_values',
             $fieldType === 'keyword'
-                ? $this->filter->elasticsearch_field
-                : $this->filter->elasticsearch_field.'.keyword',
+                ? $field
+                : $field.'.keyword',
             [
                 'size' => 10000,
                 'order' => ['_key' => 'asc'],
@@ -78,157 +127,87 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
     /**
      * Apply the elasticsearch filter to the query
      */
-    public function apply(ElasticQueryBuilder $query, array $values): ElasticQueryBuilder
+    public function apply(ElasticQueryBuilder $query, array $values, string $context = 'company'): ElasticQueryBuilder
     {
-        $included = array_column(array_filter($values, fn ($v) => ! $v['excluded']), 'value');
-        $excluded = array_column(array_filter($values, fn ($v) => $v['excluded']), 'value');
-
-        if (! empty($included)) {
-            $this->applyFilter($query, $included, 'must');
+        $field = $this->getField($context);
+        if (empty($field)) {
+            return $query;
         }
-        if (! empty($excluded)) {
-            $this->applyFilter($query, $excluded, 'mustNot');
+
+        $include = $values['include'] ?? [];
+        $exclude = $values['exclude'] ?? [];
+        $range = $values['range'] ?? null;
+        $presence = $values['presence'] ?? null;
+        $operator = $values['operator'] ?? 'and';
+
+        if ($presence === 'known') {
+            $query->filter(['exists' => ['field' => $field]]);
+        } elseif ($presence === 'unknown') {
+            $query->mustNot(['exists' => ['field' => $field]]);
+        }
+
+        // Range
+        if (is_array($range) && (isset($range['min']) || isset($range['max']))) {
+            $clause = ['range' => [$field => array_filter([
+                'gte' => isset($range['min']) ? (float) $range['min'] : null,
+                'lte' => isset($range['max']) ? (float) $range['max'] : null,
+            ])]];
+            $query->filter($clause);
+        }
+
+        $presenceActive = in_array($presence, ['known', 'unknown'], true);
+
+        // Include values (skip when presence is active)
+        if (!$presenceActive && !empty($include)) {
+            $this->applyInclude($query, $field, $include, $operator);
+        }
+
+        // Exclude values (skip when presence is active)
+        if (!$presenceActive && !empty($exclude)) {
+            $this->applyExclude($query, $field, $exclude);
         }
 
         return $query;
     }
 
-    protected function applyFilter(ElasticQueryBuilder $query, array $values, string $type): void
+    protected function applyInclude(ElasticQueryBuilder $query, string $field, array $values, string $operator): void
     {
-        $field = $this->filter->elasticsearch_field;
-        $fieldType = $this->filter->settings['field_type'] ?? 'text';
-
-        if ($this->filter->filter_id === 'job_title') {
-            $keywords = [];
-            foreach ($values as $v) {
-                foreach (preg_split('/\s*,\s*/', (string) $v) as $k) {
-                    $k = trim($k);
-                    if ($k !== '') {
-                        $keywords[] = $k;
-                    }
+        $settings = $this->filter->settings;
+        $fieldType = $settings['field_type'] ?? 'text';
+        if ($fieldType === 'keyword') {
+            if ($operator === 'or') {
+                $query->filter(['terms' => [$field => $values]]);
+            } else {
+                foreach ($values as $v) {
+                    $query->filter(['term' => [$field => $v]]);
                 }
             }
-
-            if (empty($keywords)) {
-                return;
-            }
-
-            $fields = [
-                'title^4',
-                'job_title^3',
-                'normalized_title^6',
-                'title_keywords^8',
-            ];
-
-            $should = [];
-            foreach ($keywords as $k) {
-                $should[] = [
-                    'multi_match' => [
-                        'query' => $k,
-                        'fields' => $fields,
-                        'type' => 'best_fields',
-                        'fuzziness' => 'AUTO',
-                        'operator' => 'or',
-                    ],
-                ];
-                $should[] = ['match' => ['title_synonyms' => $k]];
-            }
-
-            $query->$type([
+            return;
+        }
+        if ($operator === 'or') {
+            $query->filter([
                 'bool' => [
-                    'should' => $should,
+                    'should' => array_map(fn($v) => ['match_phrase' => [$field => $v]], $values),
                     'minimum_should_match' => 1,
                 ],
             ]);
-
-            return;
-        }
-
-        // Number fields support ranges and exact terms
-        if ($fieldType === 'number') {
-            $should = [];
+        } else {
             foreach ($values as $v) {
-                $val = is_string($v) ? trim($v) : $v;
-                if (is_string($val)) {
-                    if (preg_match('/^(\d+)\s*-\s*(\d+)$/', $val, $m)) {
-                        $should[] = ['range' => [$field => ['gte' => (int) $m[1], 'lte' => (int) $m[2]]]];
-
-                        continue;
-                    }
-                    if (preg_match('/^>=\s*(\d+)$/', $val, $m)) {
-                        $should[] = ['range' => [$field => ['gte' => (int) $m[1]]]];
-
-                        continue;
-                    }
-                    if (preg_match('/^<=\s*(\d+)$/', $val, $m)) {
-                        $should[] = ['range' => [$field => ['lte' => (int) $m[1]]]];
-
-                        continue;
-                    }
-                    if (preg_match('/^\d+$/', $val)) {
-                        $should[] = ['term' => [$field => (int) $val]];
-
-                        continue;
-                    }
-                }
-                if (is_numeric($val)) {
-                    $should[] = ['term' => [$field => (int) $val]];
-                }
+                $query->filter(['match_phrase' => [$field => $v]]);
             }
-
-            if (! empty($should)) {
-                $query->$type([
-                    'bool' => [
-                        'should' => $should,
-                        'minimum_should_match' => 1,
-                    ],
-                ]);
-            }
-
-            return;
         }
-
-        $clause = $fieldType === 'keyword'
-            ? ['terms' => [$field => $values]]
-            : [
-                'bool' => [
-                    'should' => array_map(
-                        fn ($value) => [
-                            'match_phrase' => [
-                                $field => $value,
-                            ],
-                        ],
-                        $values
-                    ),
-                    'minimum_should_match' => 1,
-                ],
-            ];
-
-        $query->$type($clause);
     }
 
-    /**
-     * Validate the input values
-     */
-    public function validateValues(array $values): bool
+    protected function applyExclude(ElasticQueryBuilder $query, string $field, array $values): void
     {
-        if (empty($values)) {
-            return false;
+        $settings = $this->filter->settings;
+        $fieldType = $settings['field_type'] ?? 'text';
+        if ($fieldType === 'keyword') {
+            $query->mustNot(['terms' => [$field => $values]]);
+            return;
         }
-
-        return collect($values)->every(function ($value) {
-            $v = $value['value'] ?? null;
-            if (is_null($v)) {
-                return false;
-            }
-            if (is_numeric($v)) {
-                return true;
-            }
-            if (is_string($v)) {
-                return trim($v) !== '';
-            }
-
-            return false;
-        });
+        foreach ($values as $v) {
+            $query->mustNot(['match_phrase' => [$field => $v]]);
+        }
     }
 }

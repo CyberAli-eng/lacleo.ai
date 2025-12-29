@@ -1,4 +1,5 @@
 import { FilterState, SelectedFilter, RangeFilterValue, ActiveFilter } from "@/interface/filters/slice"
+import type { FilterDSL } from "@/features/filters/adapter/querySerializer"
 import { TRootState } from "@/interface/reduxRoot/state"
 import { PayloadAction, createSlice } from "@reduxjs/toolkit"
 
@@ -16,87 +17,125 @@ const initialState: FilterState = {
 
 // Helper: map UI sectionId to DSL key
 export const sectionToKey: Record<string, string> = {
-  // Contact filters
+  // Contact filters (use FilterRegistry IDs)
   job_title: "job_title",
-  departments: "departments",
+  departments: "department",
   seniority: "seniority",
   years_of_experience: "experience_years",
-  contact_location: "locations",
-  contact_country: "country",
-  contact_state: "state",
-  contact_city: "city",
-  contact_has_email: "has_email",
-  contact_has_phone: "has_phone",
+  contact_country: "contact_country",
+  contact_state: "contact_state",
+  contact_city: "contact_city",
+  contact_has_email: "work_email_exists",
+  contact_has_phone: "mobile_number_exists",
   // Contact filters that join to company data
   company_technologies_contact: "technologies",
   annual_revenue_contact: "annual_revenue",
   founded_year_contact: "founded_year",
   total_funding_contact: "total_funding",
   employee_count_contact: "employee_count",
-  company_country_contact: "country",
-  company_state_contact: "state",
-  company_city_contact: "city",
 
-  // Company filters (context-aware mapping in SearchService handles these)
+  // Company filters (use FilterRegistry IDs)
   company_employee_count: "employee_count",
   employee_count: "employee_count",
-  company_revenue_range: "revenue",
-  company_revenue: "revenue",
+  company_revenue_range: "annual_revenue",
+  company_revenue: "annual_revenue",
   annual_revenue: "annual_revenue",
   founded_year: "founded_year",
   total_funding: "total_funding",
-  company_industries: "industries",
-  industry: "industries",
+  company_industries: "industry",
+  industry: "industry",
   company_technologies: "technologies",
   technologies: "technologies",
-  company_headquarters: "locations",
-  company_location: "locations",
-  company_country: "country",
-  company_state: "state",
-  company_city: "city",
+  company_country: "company_country",
+  company_state: "company_state",
+  company_city: "company_city",
   company_founded_year: "founded_year",
-  company_domain: "domains",
-  company_domain_company: "domains",
-  company_domain_contact: "domains",
-  company_name_company: "company_names",
-  company_name_contact: "company_names",
-  company_has_email: "has_email",
-  company_has_phone: "has_phone",
+  company_domain: "company_domain",
+  company_domain_company: "company_domain",
+  company_domain_contact: "company_domain",
+  company_name_company: "company_name",
+  company_name_contact: "company_name",
+  company_has_email: "company_phone_exists",
+  company_has_phone: "company_phone_exists",
   company_keywords: "company_keywords"
 }
 
-function updateActiveFilters(state: FilterState, sectionId: string, item: SelectedFilter, actionType: "add" | "remove", isCompanyFilter: boolean) {
-  const key = sectionToKey[sectionId] || sectionId
-  const targetBucket = isCompanyFilter ? "company" : "contact"
-  // ... existing logic ...
+function resolveBucket(state: FilterState, sectionId: string): "company" | "contact" {
+  if (state.searchContext === "companies") return "company"
+  return sectionId.startsWith("contact_") ? "contact" : "company"
 }
 
-function getSectionIdFromKey(key: string, isCompanyFilter: boolean): string | null {
+function updateActiveFilters(
+  state: FilterState,
+  sectionId: string,
+  item: SelectedFilter,
+  actionType: "add" | "remove",
+  bucketType?: "company" | "contact"
+) {
+  const key = sectionToKey[sectionId] || sectionId
+  const resolvedBucketType = bucketType ?? resolveBucket(state, sectionId)
+  const bucket = resolvedBucketType === "company" ? state.activeFilters.company : state.activeFilters.contact
+  bucket[key] = bucket[key] || { include: [], exclude: [] }
+
+  // Range
+  const rv = item.value as RangeFilterValue | undefined
+  if (rv && (rv.min !== undefined || rv.max !== undefined)) {
+    return
+  }
+
+  // Presence toggles
+  if (sectionId.endsWith("_has_email") || sectionId.endsWith("_has_phone")) {
+    if (actionType === "add") {
+      bucket[key].presence = item.type === "include" ? "known" : "unknown"
+    } else if (actionType === "remove") {
+      bucket[key].presence = "any"
+    }
+    return
+  }
+
+  // Include/Exclude lists
+  if (actionType === "add") {
+    if (item.type === "include") {
+      bucket[key].include = Array.from(new Set([...(bucket[key].include || []), String(item.name)]))
+    } else {
+      bucket[key].exclude = Array.from(new Set([...(bucket[key].exclude || []), String(item.name)]))
+    }
+  } else {
+    if (item.type === "include") {
+      bucket[key].include = (bucket[key].include || []).filter((v) => v !== String(item.name))
+    } else {
+      bucket[key].exclude = (bucket[key].exclude || []).filter((v) => v !== String(item.name))
+    }
+  }
+}
+
+export function getSectionIdFromKey(key: string, isCompanyFilter: boolean): string | null {
   const keyToSection: Record<string, string> = {
-    // Contact filters
+    // Contact filters (FilterRegistry IDs)
     job_title: "job_title",
-    departments: "departments",
+    department: "departments",
     seniority: "seniority",
     experience_years: "years_of_experience",
-    locations: "contact_location",
-    country: isCompanyFilter ? "company_country" : "contact_country",
-    state: isCompanyFilter ? "company_state" : "contact_state",
-    city: isCompanyFilter ? "company_city" : "contact_city",
-    has_email: "contact_has_email",
-    has_phone: "contact_has_phone",
+    contact_country: "contact_country",
+    contact_state: "contact_state",
+    contact_city: "contact_city",
+    work_email_exists: "contact_has_email",
+    mobile_number_exists: "contact_has_phone",
+    direct_number_exists: "contact_has_phone",
 
-    // Company filters
+    // Company filters (FilterRegistry IDs)
     employee_count: "employee_count",
-    revenue: "company_revenue_range",
     annual_revenue: "annual_revenue",
     founded_year: "founded_year",
     total_funding: "total_funding",
-    industries: "industry",
+    industry: "industry",
     technologies: "technologies",
-    domains: "company_domain_company",
-    company_names: "company_name_company",
-    company_keywords: "company_keywords",
-    industry: "industry"
+    company_domain: isCompanyFilter ? "company_domain_company" : "company_domain_contact",
+    company_name: isCompanyFilter ? "company_name_company" : "company_name_contact",
+    company_country: "company_country",
+    company_state: "company_state",
+    company_city: "company_city",
+    company_keywords: "company_keywords"
   }
   return keyToSection[key] || null
 }
@@ -120,10 +159,9 @@ const filterSlice = createSlice({
       action: PayloadAction<{
         sectionId: string
         item: SelectedFilter
-        isCompanyFilter?: boolean
       }>
     ) => {
-      const { sectionId, item, isCompanyFilter = false } = action.payload
+      const { sectionId, item } = action.payload
 
       if (!state.selectedItems[sectionId]) {
         state.selectedItems[sectionId] = []
@@ -141,7 +179,7 @@ const filterSlice = createSlice({
         state.selectedItems[sectionId].push(item)
       }
 
-      updateActiveFilters(state, sectionId, item, "add", isCompanyFilter)
+      updateActiveFilters(state, sectionId, item, "add")
     },
 
     removeSelectedItem: (
@@ -149,17 +187,16 @@ const filterSlice = createSlice({
       action: PayloadAction<{
         sectionId: string
         itemId: string
-        isCompanyFilter?: boolean
       }>
     ) => {
-      const { sectionId, itemId, isCompanyFilter = false } = action.payload
+      const { sectionId, itemId } = action.payload
 
       if (state.selectedItems[sectionId]) {
         const removedItem = state.selectedItems[sectionId].find((item) => item.id === itemId)
         state.selectedItems[sectionId] = state.selectedItems[sectionId].filter((item) => item.id !== itemId)
 
         if (removedItem) {
-          updateActiveFilters(state, sectionId, removedItem, "remove", isCompanyFilter)
+          updateActiveFilters(state, sectionId, removedItem, "remove")
         }
       }
     },
@@ -169,24 +206,20 @@ const filterSlice = createSlice({
     },
 
     clearCompanyFilters: (state) => {
-      // Remove all company-related filters from selectedItems
       const companySectionIds = [
-        "company_employee_count",
-        "company_revenue_range",
+        "employee_count",
         "annual_revenue",
         "founded_year",
         "total_funding",
-        "company_industries",
-        "company_technologies",
-        "company_headquarters",
-        "company_founded_year",
+        "industry",
+        "technologies",
         "company_domain",
-        "company_has_email",
-        "company_has_phone",
-        "company_location",
+        "company_name",
+        "company_phone_exists",
         "company_country",
         "company_state",
-        "company_city"
+        "company_city",
+        "company_keywords"
       ]
 
       companySectionIds.forEach((sectionId) => {
@@ -198,27 +231,17 @@ const filterSlice = createSlice({
     },
 
     clearContactFilters: (state) => {
-      // Remove all contact-related filters from selectedItems
       const contactSectionIds = [
         "job_title",
         "departments",
         "seniority",
         "years_of_experience",
-        "contact_location",
         "contact_country",
         "contact_state",
         "contact_city",
-        "contact_has_email",
-        "contact_has_phone",
-        // Contact filters that join to company
-        "company_technologies_contact",
-        "annual_revenue_contact",
-        "founded_year_contact",
-        "total_funding_contact",
-        "employee_count_contact",
-        "company_country_contact",
-        "company_state_contact",
-        "company_city_contact"
+        "work_email_exists",
+        "mobile_number_exists",
+        "direct_number_exists"
       ]
 
       contactSectionIds.forEach((sectionId) => {
@@ -229,62 +252,27 @@ const filterSlice = createSlice({
       state.activeFilters.contact = {}
     },
 
-    setRangeFilter: (
-      state,
-      action: PayloadAction<{
-        sectionId: string
-        range: RangeFilterValue
-        isCompanyFilter?: boolean
-      }>
-    ) => {
-      const { sectionId, range, isCompanyFilter = false } = action.payload
+    setRangeFilter: (state, action: PayloadAction<{ sectionId: string; range: RangeFilterValue }>) => {
+      const { sectionId, range } = action.payload
+      const name = `${range.min ?? "Any"}-${range.max ?? "Any"}`
+      const itemId = `range_${sectionId}_${Date.now()}`
 
-      // Create a SelectedFilter for the range
-      const rangeItem: SelectedFilter = {
-        id: `${sectionId}_range_${range.min || "0"}_${range.max || "inf"}`,
-        name: range.min && range.max ? `${range.min}-${range.max}` : range.min ? `${range.min}+` : range.max ? `up to ${range.max}` : "",
-        type: "include",
-        value: range
-      }
-
-      // Remove any existing range filters for this section
-      if (state.selectedItems[sectionId]) {
-        state.selectedItems[sectionId] = state.selectedItems[sectionId].filter(
-          (item) => !(item.value && typeof item.value === "object" && ("min" in item.value || "max" in item.value))
-        )
-      } else {
-        state.selectedItems[sectionId] = []
-      }
-
-      // Add the new range filter
+      state.selectedItems[sectionId] = (state.selectedItems[sectionId] || []).filter((item) => !item.id.startsWith(`range_${sectionId}_`))
+      const rangeItem: SelectedFilter = { id: itemId, name, type: "include", value: range }
       state.selectedItems[sectionId].push(rangeItem)
-
-      updateActiveFilters(state, sectionId, rangeItem, "add", isCompanyFilter)
+      updateActiveFilters(state, sectionId, rangeItem, "add")
     },
 
-    clearRangeFilter: (
-      state,
-      action: PayloadAction<{
-        sectionId: string
-        isCompanyFilter?: boolean
-      }>
-    ) => {
-      const { sectionId, isCompanyFilter = false } = action.payload
-
-      if (state.selectedItems[sectionId]) {
-        // Find and remove range filters
-        const rangeItems = state.selectedItems[sectionId].filter(
-          (item) => item.value && typeof item.value === "object" && ("min" in item.value || "max" in item.value)
-        )
-
-        // Remove from selectedItems
-        state.selectedItems[sectionId] = state.selectedItems[sectionId].filter(
-          (item) => !(item.value && typeof item.value === "object" && ("min" in item.value || "max" in item.value))
-        )
-
-        rangeItems.forEach((item) => {
-          updateActiveFilters(state, sectionId, item, "remove", isCompanyFilter)
-        })
+    clearRangeFilter: (state, action: PayloadAction<{ sectionId: string }>) => {
+      const { sectionId } = action.payload
+      state.selectedItems[sectionId] = (state.selectedItems[sectionId] || []).filter((item) => !item.id.startsWith(`range_${sectionId}_`))
+      const key = sectionToKey[sectionId] || sectionId
+      const bucketType = resolveBucket(state, sectionId)
+      const bucket = bucketType === "company" ? state.activeFilters.company : state.activeFilters.contact
+      if (bucket[key]) {
+        if (!bucket[key].include?.length && !bucket[key].exclude?.length && !bucket[key].presence && !bucket[key].operator) {
+          delete bucket[key]
+        }
       }
     },
 
@@ -315,7 +303,7 @@ const filterSlice = createSlice({
         const sectionId = getSectionIdFromKey(key, false)
         if (!sectionId) return
 
-        const bucket = value as { include?: unknown; exclude?: unknown; min?: number; max?: number; operator?: "or" | "and" }
+        const bucket = value as { include?: unknown; exclude?: unknown; range?: { min?: number; max?: number }; operator?: "or" | "and" }
         const inc = Array.isArray(bucket.include) ? (bucket.include as string[]) : []
         const exc = Array.isArray(bucket.exclude) ? (bucket.exclude as string[]) : []
 
@@ -324,7 +312,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}`, name: itemName, type: "include" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", false)
+            updateActiveFilters(state, sectionId, item, "add", "contact")
           })
         }
 
@@ -333,30 +321,26 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}_exclude`, name: itemName, type: "exclude" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", false)
+            updateActiveFilters(state, sectionId, item, "add", "contact")
           })
         }
 
-        // Handle range values
-        if (bucket.min !== undefined || bucket.max !== undefined) {
-          const range: RangeFilterValue = {
-            min: bucket.min,
-            max: bucket.max
-          }
+        if (bucket.range) {
+          const r = bucket.range
           const rangeItem: SelectedFilter = {
-            id: `${sectionId}_range_${range.min || "0"}_${range.max || "inf"}`,
-            name: range.min && range.max ? `${range.min}-${range.max}` : range.min ? `${range.min}+` : range.max ? `up to ${range.max}` : "",
+            id: `${sectionId}_range_${r.min ?? ""}_${r.max ?? ""}`,
+            name: `${r.min ?? "Any"}-${r.max ?? "Any"}`,
             type: "include",
-            value: range
+            value: { min: r.min, max: r.max }
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", false)
+          updateActiveFilters(state, sectionId, rangeItem, "add", "contact")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
           if (!state.activeFilters.contact[keyName]) {
-            state.activeFilters.contact[keyName] = { include: [], exclude: [], ranges: [], operator: bucket.operator }
+            state.activeFilters.contact[keyName] = { include: [], exclude: [], operator: bucket.operator }
           } else {
             state.activeFilters.contact[keyName].operator = bucket.operator
           }
@@ -368,7 +352,7 @@ const filterSlice = createSlice({
         const sectionId = getSectionIdFromKey(key, true)
         if (!sectionId) return
 
-        const bucket = value as { include?: unknown; exclude?: unknown; min?: number; max?: number; operator?: "or" | "and" }
+        const bucket = value as { include?: unknown; exclude?: unknown; range?: { min?: number; max?: number }; operator?: "or" | "and" }
         const inc = Array.isArray(bucket.include) ? (bucket.include as string[]) : []
         const exc = Array.isArray(bucket.exclude) ? (bucket.exclude as string[]) : []
 
@@ -377,7 +361,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}`, name: itemName, type: "include" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", true)
+            updateActiveFilters(state, sectionId, item, "add", "company")
           })
         }
 
@@ -386,32 +370,124 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}_exclude`, name: itemName, type: "exclude" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", true)
+            updateActiveFilters(state, sectionId, item, "add", "company")
           })
         }
 
-        // Handle range values
-        if (bucket.min !== undefined || bucket.max !== undefined) {
-          const range: RangeFilterValue = {
-            min: bucket.min,
-            max: bucket.max
-          }
+        if (bucket.range) {
+          const r = bucket.range
           const rangeItem: SelectedFilter = {
-            id: `${sectionId}_range_${range.min || "0"}_${range.max || "inf"}`,
-            name: range.min && range.max ? `${range.min}-${range.max}` : range.min ? `${range.min}+` : range.max ? `up to ${range.max}` : "",
+            id: `${sectionId}_range_${r.min ?? ""}_${r.max ?? ""}`,
+            name: `${r.min ?? "Any"}-${r.max ?? "Any"}`,
             type: "include",
-            value: range
+            value: { min: r.min, max: r.max }
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", true)
+          updateActiveFilters(state, sectionId, rangeItem, "add", "company")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
           if (!state.activeFilters.company[keyName]) {
-            state.activeFilters.company[keyName] = { include: [], exclude: [], ranges: [], operator: bucket.operator }
+            state.activeFilters.company[keyName] = { include: [], exclude: [], operator: bucket.operator }
           } else {
             state.activeFilters.company[keyName].operator = bucket.operator
+          }
+        }
+      })
+    },
+    importFiltersFromCanonical: (state, action: PayloadAction<FilterDSL>) => {
+      state.expandedSections = {}
+      state.searchTerms = {}
+      state.selectedItems = {}
+      state.activeFilters = { contact: {}, company: {} }
+
+      const { contact = {}, company = {} } = action.payload
+
+      Object.entries(contact).forEach(([key, bucket]) => {
+        const sectionId = getSectionIdFromKey(key, false)
+        if (!sectionId) return
+        const inc = Array.isArray(bucket.include) ? bucket.include : []
+        const exc = Array.isArray(bucket.exclude) ? bucket.exclude : []
+        inc.forEach((name) => {
+          const item: SelectedFilter = { id: `${sectionId}_${name}`, name, type: "include" }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(item)
+          updateActiveFilters(state, sectionId, item, "add", "contact")
+        })
+        exc.forEach((name) => {
+          const item: SelectedFilter = { id: `${sectionId}_${name}_exclude`, name, type: "exclude" }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(item)
+          updateActiveFilters(state, sectionId, item, "add", "contact")
+        })
+        if (bucket.range) {
+          const rangeItem: SelectedFilter = {
+            id: `${sectionId}_range_${bucket.range.min ?? ""}_${bucket.range.max ?? ""}`,
+            name: `${bucket.range.min ?? "Any"}-${bucket.range.max ?? "Any"}`,
+            type: "include",
+            value: { min: bucket.range.min, max: bucket.range.max }
+          }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(rangeItem)
+          updateActiveFilters(state, sectionId, rangeItem, "add", "contact")
+        }
+        if (bucket.operator) {
+          const keyName = sectionToKey[sectionId] || sectionId
+          state.activeFilters.contact[keyName] = {
+            ...(state.activeFilters.contact[keyName] || { include: [], exclude: [] }),
+            operator: bucket.operator
+          }
+        }
+        if (bucket.presence) {
+          const keyName = sectionToKey[sectionId] || sectionId
+          state.activeFilters.contact[keyName] = {
+            ...(state.activeFilters.contact[keyName] || { include: [], exclude: [] }),
+            presence: bucket.presence
+          }
+        }
+      })
+
+      Object.entries(company).forEach(([key, bucket]) => {
+        const sectionId = getSectionIdFromKey(key, true)
+        if (!sectionId) return
+        const inc = Array.isArray(bucket.include) ? bucket.include : []
+        const exc = Array.isArray(bucket.exclude) ? bucket.exclude : []
+        inc.forEach((name) => {
+          const item: SelectedFilter = { id: `${sectionId}_${name}`, name, type: "include" }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(item)
+          updateActiveFilters(state, sectionId, item, "add", "company")
+        })
+        exc.forEach((name) => {
+          const item: SelectedFilter = { id: `${sectionId}_${name}_exclude`, name, type: "exclude" }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(item)
+          updateActiveFilters(state, sectionId, item, "add", "company")
+        })
+        if (bucket.range) {
+          const rangeItem: SelectedFilter = {
+            id: `${sectionId}_range_${bucket.range.min ?? ""}_${bucket.range.max ?? ""}`,
+            name: `${bucket.range.min ?? "Any"}-${bucket.range.max ?? "Any"}`,
+            type: "include",
+            value: { min: bucket.range.min, max: bucket.range.max }
+          }
+          if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
+          state.selectedItems[sectionId].push(rangeItem)
+          updateActiveFilters(state, sectionId, rangeItem, "add", "company")
+        }
+        if (bucket.operator) {
+          const keyName = sectionToKey[sectionId] || sectionId
+          state.activeFilters.company[keyName] = {
+            ...(state.activeFilters.company[keyName] || { include: [], exclude: [] }),
+            operator: bucket.operator
+          }
+        }
+        if (bucket.presence) {
+          const keyName = sectionToKey[sectionId] || sectionId
+          state.activeFilters.company[keyName] = {
+            ...(state.activeFilters.company[keyName] || { include: [], exclude: [] }),
+            presence: bucket.presence
           }
         }
       })
@@ -419,7 +495,7 @@ const filterSlice = createSlice({
     setBucketOperator: (state, action: PayloadAction<{ bucket: "contact" | "company"; key: string; operator: "or" | "and" }>) => {
       const { bucket, key, operator } = action.payload
       if (!state.activeFilters[bucket][key]) {
-        state.activeFilters[bucket][key] = { include: [], exclude: [], ranges: [], operator }
+        state.activeFilters[bucket][key] = { include: [], exclude: [], operator }
       } else {
         state.activeFilters[bucket][key].operator = operator
       }
@@ -427,7 +503,7 @@ const filterSlice = createSlice({
     setFilterPresence: (state, action: PayloadAction<{ bucket: "contact" | "company"; key: string; presence: "any" | "known" | "unknown" }>) => {
       const { bucket, key, presence } = action.payload
       if (!state.activeFilters[bucket][key]) {
-        state.activeFilters[bucket][key] = { include: [], exclude: [], ranges: [], presence }
+        state.activeFilters[bucket][key] = { include: [], exclude: [], presence }
       } else {
         state.activeFilters[bucket][key].presence = presence
       }
@@ -436,7 +512,7 @@ const filterSlice = createSlice({
     setFilterMode: (state, action: PayloadAction<{ bucket: "contact" | "company"; key: string; mode: "all" | "any" }>) => {
       const { bucket, key, mode } = action.payload
       if (!state.activeFilters[bucket][key]) {
-        state.activeFilters[bucket][key] = { include: [], exclude: [], ranges: [], mode }
+        state.activeFilters[bucket][key] = { include: [], exclude: [], mode }
       } else {
         state.activeFilters[bucket][key].mode = mode
       }
@@ -445,7 +521,7 @@ const filterSlice = createSlice({
     setFilterFields: (state, action: PayloadAction<{ bucket: "contact" | "company"; key: string; fields: string[] }>) => {
       const { bucket, key, fields } = action.payload
       if (!state.activeFilters[bucket][key]) {
-        state.activeFilters[bucket][key] = { include: [], exclude: [], ranges: [], fields }
+        state.activeFilters[bucket][key] = { include: [], exclude: [], fields }
       } else {
         state.activeFilters[bucket][key].fields = fields
       }
@@ -465,6 +541,7 @@ export const {
   clearRangeFilter,
   resetFilters,
   importFiltersFromDSL,
+  importFiltersFromCanonical,
   setBucketOperator,
   setFilterPresence,
   setFilterMode,

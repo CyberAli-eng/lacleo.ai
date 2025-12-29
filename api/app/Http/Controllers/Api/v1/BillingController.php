@@ -19,34 +19,56 @@ class BillingController extends Controller
     public function usage(Request $request)
     {
         $user = $request->user();
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
 
-        $workspace = Workspace::firstOrCreate(
-            ['owner_user_id' => $user->id],
-            ['id' => (string) strtolower(Str::ulid()), 'credit_balance' => 0, 'credit_reserved' => 0]
-        );
+        try {
+            $workspace = Workspace::firstOrCreate(
+                ['owner_user_id' => $user->id],
+                ['id' => (string) strtolower(Str::ulid()), 'credit_balance' => 0, 'credit_reserved' => 0]
+            );
 
-        $subscription = Subscription::where('workspace_id', $workspace->id)->orderByDesc('created_at')->first();
+            $subscription = Subscription::where('workspace_id', $workspace->id)->orderByDesc('created_at')->first();
 
-        $periodStart = $subscription && $subscription->current_period_end
-            ? Carbon::parse($subscription->current_period_end)->subMonth()->startOfDay()
-            : Carbon::now()->startOfMonth();
+            $periodStart = $subscription && $subscription->current_period_end
+                ? Carbon::parse($subscription->current_period_end)->subMonth()->startOfDay()
+                : Carbon::now()->startOfMonth();
 
-        $periodEnd = $subscription && $subscription->current_period_end
-            ? Carbon::parse($subscription->current_period_end)
-            : Carbon::now()->endOfMonth();
+            $periodEnd = $subscription && $subscription->current_period_end
+                ? Carbon::parse($subscription->current_period_end)
+                : Carbon::now()->endOfMonth();
 
-        $transactions = CreditTransaction::where('workspace_id', $workspace->id)
-            ->whereBetween('created_at', [$periodStart, $periodEnd])
-            ->get();
+            $transactions = CreditTransaction::where('workspace_id', $workspace->id)
+                ->whereBetween('created_at', [$periodStart, $periodEnd])
+                ->get();
 
-        $used = $transactions->where('amount', '<', 0)->sum(fn ($t) => abs($t->amount));
+            $used = $transactions->where('amount', '<', 0)->sum(fn ($t) => abs($t->amount));
 
-        $revealEmail = $transactions
-            ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_email'))
-            ->sum(fn ($t) => abs($t->amount));
-        $revealPhone = $transactions
-            ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_phone'))
-            ->sum(fn ($t) => abs($t->amount));
+            $revealEmail = $transactions
+                ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_email'))
+                ->sum(fn ($t) => abs($t->amount));
+            $revealPhone = $transactions
+                ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_phone'))
+                ->sum(fn ($t) => abs($t->amount));
+        } catch (\Throwable $e) {
+            return response()->json([
+                'balance' => 0,
+                'plan_total' => 0,
+                'used' => 0,
+                'period_start' => Carbon::now()->startOfMonth()->toIso8601String(),
+                'period_end' => Carbon::now()->endOfMonth()->toIso8601String(),
+                'breakdown' => [
+                    'reveal_email' => 0,
+                    'reveal_phone' => 0,
+                    'export_email' => 0,
+                    'export_phone' => 0,
+                    'adjustments' => 0,
+                ],
+                'free_grants_total' => 0,
+                'stripe_enabled' => false,
+            ]);
+        }
 
         // Exports are recorded with meta email_count and phone_count; compute per-category credits
         $exportEmailCredits = $transactions

@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\v1;
 
 use App\Http\Controllers\Controller;
 use App\Services\AiQueryTranslatorService;
+use App\Services\FilterRegistry;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class AiSearchController extends Controller
 {
@@ -18,74 +20,84 @@ class AiSearchController extends Controller
      */
     public function translate(Request $request)
     {
-        $request->headers->set('Accept', 'application/json');
-        $incomingQuery = (string) ($request->input('query') ?? '');
-        if ($incomingQuery === '') {
-            $fallback = (string) ($request->input('prompt') ?? $request->input('instruction') ?? '');
-            if ($fallback !== '') {
-                $request->merge(['query' => $fallback]);
-            }
-        }
-        // STEP 1A: Fix validation - messages is optional, query is required
-        $validated = $request->validate([
-            'query' => 'required|string|max:2000',
-            'messages' => 'nullable|array',
-            'messages.*.role' => 'nullable|in:user,assistant',
-            'messages.*.content' => 'nullable|string|max:2000',
-            'context' => 'nullable|array',
-            'context.lastResultCount' => 'nullable|integer',
-        ]);
-
-        $messages = $validated['messages'] ?? [];
-        if (!empty($validated['query'])) {
-            $lastMessage = end($messages);
-            if ($lastMessage && ($lastMessage['role'] ?? null) === 'user') {
-                $messages[count($messages) - 1]['content'] = $validated['query'];
-            } else {
-                $messages[] = ['role' => 'user', 'content' => $validated['query']];
-            }
-        }
-
-        // STEP 1D: Wrap in try-catch to ensure 200 response
         try {
-            $result = $this->translator->translate(
-                $messages, // First parameter: messages array
-                $validated['context'] ?? [] // Second parameter: context
-            );
-            $filters = $result['filters'] ?? [];
-            if (($result['entity'] ?? 'contacts') === 'contacts') {
-                if (preg_match('/\bengineer\b/i', $validated['query'])) {
-                    $existing = $filters['job_title']['include'] ?? [];
-                    $filters['job_title'] = [
-                        'include' => array_values(array_unique(array_merge($existing, ['Engineer']))),
-                        'exclude' => $filters['job_title']['exclude'] ?? [],
-                        'match_type' => $filters['job_title']['match_type'] ?? 'any',
-                    ];
-                }
-                if (preg_match('/\bgermany\b/i', $validated['query'])) {
-                    $filters['location'] = $filters['location'] ?? [
-                        'type' => 'contact',
-                        'include' => ['countries' => [], 'states' => [], 'cities' => []],
-                        'exclude' => ['countries' => [], 'states' => [], 'cities' => []],
-                        'known' => true,
-                        'unknown' => false,
-                    ];
-                    $countries = $filters['location']['include']['countries'] ?? [];
-                    $filters['location']['include']['countries'] = array_values(array_unique(array_merge($countries, ['Germany'])));
-                }
+            $request->headers->set('Accept', 'application/json');
+            
+            // 1. Get the query from the user
+            $incomingQuery = (string) ($request->input('query') ?? $request->input('prompt') ?? '');
+
+            // 2. Prepare the "Dictionary" from your FilterRegistry
+            // This tells the AI exactly what names to use (e.g., company_city instead of 'city')
+            $registryFilters = FilterRegistry::getFilters();
+            $filterGuidelines = collect($registryFilters)->map(function($f) {
+                $applies = isset($f['applies_to']) && is_array($f['applies_to']) ? implode(',', $f['applies_to']) : 'unknown';
+                return "- ID: {$f['id']} | Label: {$f['label']} | Applies To: {$applies}";
+            })->implode("\n");
+
+            // 3. Build the Instructions
+            $instruction = "You are a lead generation assistant. Convert the user's query into Canonical DSL JSON.
+            AVAILABLE FILTER IDS (from registry):
+            {$filterGuidelines}
+
+            Canonical DSL shape:
+            {
+              \"entity\": \"contacts\" | \"companies\",
+              \"filters\": {
+                \"contact\": { FILTER_ID: { include: [values], exclude?: [values], range?: { min?: number, max?: number } } },
+                \"company\": { FILTER_ID: { include: [values], exclude?: [values], range?: { min?: number, max?: number } } }
+              },
+              \"summary\": \"short explanation\",
+              \"semantic_query\": null | \"optional vector sentence\",
+              \"custom\": []
             }
-            $result['filters'] = $filters;
+
+            Routing rules:
+            - job_title and other person attributes ALWAYS go under filters.contact.
+            - company_name, company_domain, industry, technologies, employee_count, annual_revenue, founded_year go under filters.company.
+            - NEVER put job_title under filters.company.
+            - When multiple job titles are present, keep the longest/specific ones (e.g., 'AI Engineer' over 'Engineer').
+            - If job title detected, entity = contacts; else if only company metrics detected, entity = companies; else default entity = contacts.
+
+            Output ONLY valid JSON in the Canonical DSL shape.";
+
+            // 4. Mimic your original structure to avoid 500 errors
+            $messages = [
+                ['role' => 'user', 'content' => $instruction . "\n\nUser Query: " . $incomingQuery]
+            ];
+
+            // 5. Call the service (Your original method call)
+            $result = $this->translator->translate(
+                $messages, 
+                $request->input('context') ?? []
+            );
+
+            // 6. Ensure Canonical DSL buckets exist
+            if (!isset($result['filters']) || !is_array($result['filters'])) {
+                $result['filters'] = ['contact' => [], 'company' => []];
+            }
+            if (!isset($result['filters']['contact']) || !is_array($result['filters']['contact'])) {
+                $result['filters']['contact'] = [];
+            }
+            if (!isset($result['filters']['company']) || !is_array($result['filters']['company'])) {
+                $result['filters']['company'] = [];
+            }
+            if (!isset($result['entity'])) {
+                $result['entity'] = 'contacts';
+            }
+
+            return response()->json($result, 200);
+
         } catch (\Throwable $e) {
-        return response()->json([
-            'status' => 'failed',
-            'entity' => null,
-            'filters' => [],
-            'summary' => 'AI could not reliably interpret the request.',
-            'semantic_query' => null,
-            'custom' => [],
-            'error_code' => 'AI_TRANSLATION_FAILED'
-        ], 200);
-    }
-        return response()->json($result, 200);
+            // Log the error so you can see exactly what went wrong in storage/logs/laravel.log
+            Log::error("AI Search Error: " . $e->getMessage());
+
+            return response()->json([
+                'status' => 'failed',
+                'entity' => 'contacts',
+                'filters' => ['contact' => [], 'company' => []],
+                'summary' => 'The AI is having trouble. Please try a simpler search.',
+                'error_code' => 'AI_INTERNAL_ERROR'
+            ], 200); // We return 200 so the frontend doesn't crash
+        }
     }
 }

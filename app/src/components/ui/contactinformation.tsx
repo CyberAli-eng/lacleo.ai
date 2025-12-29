@@ -479,7 +479,6 @@ const ContactInformation = ({ contact, onClose, hideContactFields = false, hideC
                       </span>
                       <button onClick={toggleRevealCompanyPhone} className="text-blue-500 hover:text-blue-600" aria-label="Reveal company phone">
                         <Eye className="mr-1 size-4" />
-                        
                       </button>
                     </div>
                   </div>
@@ -506,7 +505,6 @@ const ContactInformation = ({ contact, onClose, hideContactFields = false, hideC
                       <button onClick={toggleRevealEmail} className="text-blue-500 transition-colors hover:text-blue-600" aria-label="Reveal email">
                         <span className="text-[10px] text-gray-400">1 credits</span>
                         <Eye className="mr-1 size-4" />
-                        
                       </button>
                     </div>
                   </div>
@@ -617,7 +615,6 @@ const ContactInformation = ({ contact, onClose, hideContactFields = false, hideC
                   </p>
                   <button onClick={toggleRevealCompanyPhone} className="text-blue-500 hover:text-blue-600" aria-label="Reveal company phone">
                     <Eye className="mr-1 size-4" />
-                  
                   </button>
                 </div>
               </div>
@@ -648,7 +645,6 @@ const ContactInformation = ({ contact, onClose, hideContactFields = false, hideC
                     </p>
                     <button onClick={toggleRevealCompanyEmail} className="text-blue-500 hover:text-blue-600" aria-label="Reveal company email">
                       <Eye className="mr-1 size-4" />
-                    
                     </button>
                   </div>
                 </div>

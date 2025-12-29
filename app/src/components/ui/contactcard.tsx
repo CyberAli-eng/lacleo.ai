@@ -319,7 +319,6 @@ const ContactCard: React.FC<ContactCardProps> = ({ contact, location = "", secon
                       className="flex items-center gap-1 text-blue-500 transition-colors hover:text-blue-600"
                       aria-label="Reveal company phone"
                     >
-                      
                       <Eye className="size-4" />
                     </button>
                   </div>
@@ -369,7 +368,6 @@ const ContactCard: React.FC<ContactCardProps> = ({ contact, location = "", secon
                       className="flex items-center gap-1 text-blue-500 transition-colors hover:text-blue-600"
                       aria-label="Reveal email"
                     >
-                     
                       <Eye className="size-4" />
                     </button>
                   </div>
@@ -400,7 +398,6 @@ const ContactCard: React.FC<ContactCardProps> = ({ contact, location = "", secon
                       className="flex items-center gap-1 text-blue-500 transition-colors hover:text-blue-600"
                       aria-label="Reveal company email"
                     >
-                      
                       <Eye className="size-4" />
                     </button>
                   </div>

@@ -12,6 +12,9 @@ class LeaveTeamTest extends TestCase
 
     public function test_users_can_leave_teams(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $user = User::factory()->withPersonalTeam()->create();
 
         $user->currentTeam->users()->attach(
@@ -27,6 +30,9 @@ class LeaveTeamTest extends TestCase
 
     public function test_team_owners_cant_leave_their_own_team(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $response = $this->delete('/teams/'.$user->currentTeam->id.'/members/'.$user->id);

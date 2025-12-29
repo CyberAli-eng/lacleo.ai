@@ -27,7 +27,7 @@ it('preview-export returns consistent counts and balances', function () {
 
     $resp->assertOk();
     $resp->assertJson([
-        'contacts_included' => 3,
+        'total_rows' => 3,
         'email_count' => 2,
         'phone_count' => 1,
         'credits_required' => 2 * 1 + 1 * 4,

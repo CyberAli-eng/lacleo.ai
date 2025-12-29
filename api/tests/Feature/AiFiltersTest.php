@@ -14,16 +14,16 @@ it('extracts title and country from text', function () {
     $resp->assertOk();
     $filters = $resp->json('filters');
     $fields = collect($filters)->pluck('field')->all();
-    expect($fields)->toContain('title');
-    expect($fields)->toContain('location.country');
-    $title = collect($filters)->firstWhere('field', 'title');
-    $country = collect($filters)->firstWhere('field', 'location.country');
+    expect($fields)->toContain('job_title');
+    expect($fields)->toContain('contact_country');
+    $title = collect($filters)->firstWhere('field', 'job_title');
+    $country = collect($filters)->firstWhere('field', 'contact_country');
     expect($title['value'])->toBe('cto');
     expect($country['value'])->toBe('india');
 });
 
 it('modifies existing filters by replacing values and adding new', function () {
-    $existing = [['field' => 'title', 'operator' => '=', 'value' => 'engineer']];
+    $existing = [['field' => 'job_title', 'operator' => '=', 'value' => 'engineer']];
     $resp = $this->postJson('/api/v1/ai/generate-filters', [
         'mode' => 'modify_filters',
         'current_filters' => $existing,
@@ -31,8 +31,8 @@ it('modifies existing filters by replacing values and adding new', function () {
     ]);
     $resp->assertOk();
     $filters = $resp->json('filters');
-    $title = collect($filters)->firstWhere('field', 'title');
-    $country = collect($filters)->firstWhere('field', 'location.country');
+    $title = collect($filters)->firstWhere('field', 'job_title');
+    $country = collect($filters)->firstWhere('field', 'contact_country');
     expect($title['value'])->toBe('cto');
     expect($country['value'])->toBe('india');
 });
@@ -44,7 +44,7 @@ it('extracts company domain from text', function () {
     ]);
     $resp->assertOk();
     $filters = $resp->json('filters');
-    $domain = collect($filters)->firstWhere('field', 'company.domain');
+    $domain = collect($filters)->firstWhere('field', 'company_domain');
     expect($domain['value'])->toBe('acme.com');
 });
 
@@ -56,7 +56,7 @@ it('deduplicates repeated tokens', function () {
     $resp->assertOk();
     $filters = $resp->json('filters');
     $fields = collect($filters)->pluck('field')->unique()->values()->all();
-    expect($fields)->toContain('title');
-    expect($fields)->toContain('location.country');
+    expect($fields)->toContain('job_title');
+    expect($fields)->toContain('contact_country');
     expect(count($fields))->toBe(2);
 });

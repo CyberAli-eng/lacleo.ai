@@ -58,7 +58,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
   const [estimateExport, { isLoading: estimating }] = useExportEstimateMutation()
   const [createExport, { isLoading: exporting }] = useExportCreateMutation()
   const { data: creditData, isLoading: loadingCredits } = useBillingUsageQuery(undefined, { skip: !open })
-  
+
   // Calculate total credits from credit data
   const totalCredits = useMemo(() => {
     if (!creditData) return 0
@@ -94,7 +94,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
   const emailsToExport = canShowCounts ? (estimate as { email_count: number }).email_count : 0
   const phonesToExport = canShowCounts ? (estimate as { phone_count: number }).phone_count : 0
   // Debug logging
-  console.log('estimate:', estimate, 'canShowCounts:', canShowCounts, 'emailsToExport:', emailsToExport, 'phonesToExport:', phonesToExport)
+  console.log("estimate:", estimate, "canShowCounts:", canShowCounts, "emailsToExport:", emailsToExport, "phonesToExport:", phonesToExport)
   const creditsRequired = canShowCounts ? (estimate as { credits_required: number }).credits_required : undefined
   const availableCredits = canShowCounts ? (estimate as { remaining_before: number }).remaining_before : undefined
   const est = estimate as { credits_required: number; remaining_before: number }
@@ -114,7 +114,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
 
     const timer = setTimeout(() => {
       const ids = selectedIds
-      console.log('Export estimate - selectedIds:', ids, 'exportMode:', exportMode, 'exportCount:', exportCount)
+      console.log("Export estimate - selectedIds:", ids, "exportMode:", exportMode, "exportCount:", exportCount)
       // If we are in "selected" mode but no IDs, zero out
       if (exportMode === "selected" && (!ids || ids.length === 0)) {
         setEstimate({
@@ -128,9 +128,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
         })
         return
       }
-     
-    
-     
+
       // If custom mode, we might not need IDs, but let's send what we have + limit
       if (exportCount <= 0) return
 
@@ -194,7 +192,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
     >
       <DialogTitle className="sr-only ">Dialog</DialogTitle>
       <DialogDescription className="sr-only">Internal dialog content</DialogDescription>
-      <DialogContent className="max-w-[400px]  max-h-[600px] overflow-y-auto rounded-xl border p-0  ">
+      <DialogContent className="max-h-[600px]  max-w-[400px] overflow-y-auto rounded-xl border p-0  ">
         <DialogHeader className="flex flex-row items-start justify-between border-b border-border p-5">
           <DialogTitle className="flex flex-row items-center gap-3.5">
             <span className="flex items-center justify-center rounded-full border p-[10px]">
@@ -263,13 +261,13 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 value={customCount}
                 onChange={(e) => setCustomCount(e.target.value)}
                 disabled={exportMode !== "custom"}
-                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""} ${isCustomCountTooHigh ? "border-red-500" : ""}`}
+                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""} ${
+                  isCustomCountTooHigh ? "border-red-500" : ""
+                }`}
               />
               <span className=" text-xs font-medium text-gray-600">Out of {totalAvailable}</span>
             </div>
-            {isCustomCountTooHigh && (
-              <span className="text-xs font-medium text-red-600">Custom value is too high</span>
-            )}
+            {!!isCustomCountTooHigh && <span className="text-xs font-medium text-red-600">Custom value is too high</span>}
           </div>
 
           <div>
@@ -298,19 +296,20 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 <span className="text-xl font-medium text-gray-950">
                   {creditsRequired !== undefined
                     ? type === "contacts"
-                      ? (phonesToExport * 4 + emailsToExport * 1) === 0
+                      ? phonesToExport * 4 + emailsToExport * 1 === 0
                         ? "Free"
                         : `${phonesToExport * 4 + emailsToExport * 1} Credits`
                       : creditsRequired === 0
-                      ? "Free"
-                      : `${creditsRequired} Credits`
+                        ? "Free"
+                        : `${creditsRequired} Credits`
                     : "..."}
                 </span>
               </div>
               <div className="border-b"></div>
               <div className="flex w-full justify-center rounded-b-xl bg-[#F7F7F7] py-2.5">
                 <span className={`text-sm font-medium ${insufficient ? "text-red-600" : "text-gray-600"}`}>
-                  Total Credits: <span className="text-gray-950 font-semibold">{loadingCredits ? "..." : totalCredits}</span> | Available: <span className="text-gray-950">{availableCredits !== undefined ? availableCredits : "..."}</span>
+                  Total Credits: <span className="font-semibold text-gray-950">{loadingCredits ? "..." : totalCredits}</span> | Available:{" "}
+                  <span className="text-gray-950">{availableCredits !== undefined ? availableCredits : "..."}</span>
                 </span>
               </div>
             </div>

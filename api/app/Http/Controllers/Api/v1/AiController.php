@@ -6,9 +6,14 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use App\Services\AiQueryTranslatorService;
 
 class AiController extends Controller
 {
+    public function __construct(
+        protected AiQueryTranslatorService $translator
+    ) {}
+
     public function generateFilters(Request $request)
     {
         $request->headers->set('Accept', 'application/json');
@@ -24,17 +29,21 @@ class AiController extends Controller
         if ($mode === 'modify_filters') {
             $current = (array) $request->input('current_filters', []);
             $instruction = (string) $request->input('instruction', '');
-            $text = $instruction !== '' ? $instruction : ($query !== '' ? $query : $prompt);
-            $generated = $this->parseCanonical($text, $context);
-            $merged = $this->mergeFilters($current, $generated);
 
-            return response()->json(['filters' => $merged, 'model' => 'local'], 200);
+            $messages = [
+                ['role' => 'user', 'content' => $instruction]
+            ];
+
+            // Translate using the service and return canonical DSL
+            $result = $this->translator->translate($messages, ['current_filters' => $current]);
+            return response()->json(['filters' => $result['filters'], 'entity' => $result['entity'] ?? 'contacts', 'model' => 'local'], 200);
         }
 
         $text = $query !== '' ? $query : $prompt;
-        $canonical = $this->parseCanonical($text, $context);
-
-        return response()->json(['filters' => $canonical, 'model' => 'local'], 200);
+        
+        // Use the service to translate
+        $result = $this->translator->translate([['role' => 'user', 'content' => $text]]);
+        return response()->json(['filters' => $result['filters'], 'entity' => ($result['entity'] ?? 'contacts'), 'model' => 'local'], 200);
     }
 
     public function contactSummary(Request $request)
@@ -100,125 +109,97 @@ class AiController extends Controller
         return trim($s);
     }
 
-    protected function parseCanonical(string $input, string $context): array
+    /**
+     * Convert the nested DSL format from AiQueryTranslatorService to the flat list format
+     * expected by the frontend for this endpoint.
+     */
+    protected function flattenFilters(array $dslFilters, string $entity = 'contacts'): array
     {
-        // ... [existing code remains the same]
-        $t = $this->normalizeText($input);
-        $fields = [
-            'company.name',
-            'company.domain',
-            'company.industry',
-            'company.country',
-            'company.size',
-            'title',
-            'seniority',
-            'department',
-            'location.country',
-            'location.state',
-            'location.city',
-            // Contact-specific name fields
-            'first_name',
-            'last_name',
-        ];
-        $out = [];
-
-        if (preg_match('/\b([a-z0-9\-]+\.[a-z]{2,})\b/', $input, $md)) {
-            $out['company.domain'] = $md[1];
-        }
-
-        $titles = ['cto', 'ceo', 'cfo', 'coo', 'cio', 'developer', 'engineer', 'manager', 'designer', 'analyst', 'consultant'];
-        foreach ($titles as $ti) {
-            if (preg_match('/\b' . preg_quote($ti, '/') . 's?\b/', $t)) {
-                $out['title'] = $ti;
-                break;
-            }
-        }
-
-        $departments = ['engineering', 'marketing', 'sales', 'hr', 'product', 'design'];
-        foreach ($departments as $d) {
-            if (preg_match('/\b' . preg_quote($d, '/') . '\b/', $t)) {
-                $out['department'] = $d;
-                break;
-            }
-        }
-
-        $countries = ['india', 'usa', 'united states', 'uk', 'canada', 'germany', 'france'];
-        foreach ($countries as $c) {
-            if (preg_match('/\b' . preg_quote($c, '/') . '\b/', $t)) {
-                $out['location.country'] = $c;
-                break;
-            }
-        }
-
-        $states = ['california', 'texas', 'new york'];
-        foreach ($states as $s) {
-            if (preg_match('/\b' . preg_quote($s, '/') . '\b/', $t)) {
-                $out['location.state'] = $s;
-                break;
-            }
-        }
-
-        if (preg_match('/\bat\s+([a-z][a-z0-9 ]{1,})\b/', $t, $mc)) {
-            $out['company.name'] = trim($mc[1]);
-        }
-
-        if (preg_match('/\bindustry\b\s*[:\-]?\s*([a-z ]+)/', $t, $mi)) {
-            $out['company.industry'] = trim($mi[1]);
-        }
-
-        // Contact name parsing (first/last name and generic name)
-        // Always parse name cues so the UI can map appropriately based on page context
-        // Explicit first name
-        if (preg_match('/\bfirst\s+name\b\s*[:\-]?\s*([a-zA-Z][a-zA-Z\s\'\-]+)/', $input, $mf)) {
-            $out['first_name'] = trim($mf[1]);
-        }
-        // Explicit last name
-        if (preg_match('/\blast\s+name\b\s*[:\-]?\s*([a-zA-Z][a-zA-Z\s\'\-]+)/', $input, $ml)) {
-            $out['last_name'] = trim($ml[1]);
-        }
-        // Generic "name" cue (e.g., "search contact name sujata")
-        if (!isset($out['first_name']) && !isset($out['last_name'])) {
-            if (preg_match('/\b(contact\s+)?name\b\s*[:\-]?\s*([a-zA-Z][a-zA-Z\s\'\-]+)/', $input, $mn)) {
-                $raw = trim($mn[2]);
-                $parts = preg_split('/\s+/', $raw);
-                if ($parts && count($parts) > 1) {
-                    $out['first_name'] = $parts[0];
-                    $out['last_name'] = $parts[count($parts) - 1];
-                } elseif ($raw !== '') {
-                    $out['first_name'] = $raw;
-                }
-            }
-        }
-
-        $final = [];
-        foreach ($out as $field => $value) {
-            if (in_array($field, $fields, true)) {
-                if ($field === 'company.domain') {
-                    $final[$field] = strtolower(trim((string) $value));
-                } else {
-                    $final[$field] = $this->normalizeText((string) $value);
-                }
-            }
-        }
-
         $items = [];
-        foreach ($final as $field => $value) {
-            $mapped = $field;
-            if ($field === 'location.state') {
-                $mapped = 'state';
-            } elseif ($field === 'company.name') {
-                $mapped = 'company';
-            } elseif ($field === 'first_name') {
-                $mapped = 'first_name';
-            } elseif ($field === 'last_name') {
-                $mapped = 'last_name';
+        $contactCtx = strtolower($entity) === 'contacts';
+
+        $mapField = function (string $field) use ($contactCtx) {
+            return match ($field) {
+                'title' => 'job_title',
+                'company.domain' => 'company_domain',
+                'location.country' => $contactCtx ? 'contact_country' : 'company_country',
+                default => $field,
+            };
+        };
+
+        foreach ($dslFilters as $field => $config) {
+            // Expand nested location object
+            if ($field === 'location' && is_array($config)) {
+                $inc = $config['include'] ?? [];
+                if (isset($inc['countries']) && is_array($inc['countries'])) {
+                    foreach ($inc['countries'] as $val) {
+                        $items[] = ['field' => $contactCtx ? 'contact_country' : 'company_country', 'operator' => '=', 'value' => $this->normalizeText((string) $val)];
+                    }
+                }
+                if (isset($inc['states']) && is_array($inc['states'])) {
+                    foreach ($inc['states'] as $val) {
+                        $items[] = ['field' => $contactCtx ? 'contact_state' : 'company_state', 'operator' => '=', 'value' => $this->normalizeText((string) $val)];
+                    }
+                }
+                if (isset($inc['cities']) && is_array($inc['cities'])) {
+                    foreach ($inc['cities'] as $val) {
+                        $items[] = ['field' => $contactCtx ? 'contact_city' : 'company_city', 'operator' => '=', 'value' => $this->normalizeText((string) $val)];
+                    }
+                }
+                continue;
             }
-            $items[] = ['field' => $mapped, 'operator' => '=', 'value' => $value];
+
+            $canonicalField = $mapField((string) $field);
+
+            // Include values
+            if (isset($config['include']) && is_array($config['include'])) {
+                foreach ($config['include'] as $val) {
+                    $value = (string) $val;
+                    $items[] = ['field' => $canonicalField, 'operator' => '=', 'value' => ($canonicalField === 'company_domain' ? strtolower(trim($value)) : $this->normalizeText($value))];
+                }
+                continue;
+            }
+
+            // Simple value (legacy/fallback)
+            if (!is_array($config)) {
+                $value = (string) $config;
+                $items[] = ['field' => $canonicalField, 'operator' => '=', 'value' => ($canonicalField === 'company_domain' ? strtolower(trim($value)) : $this->normalizeText($value))];
+                continue;
+            }
+
+            // Range or other structures are currently unsupported in this endpoint
         }
-        usort($items, fn($a, $b) => strcmp($a['field'], $b['field']));
+
+        // Prefer contact_* over company_* when both present
+        $hasContactCountry = array_reduce($items, fn($c, $it) => $c || $it['field'] === 'contact_country', false);
+        if ($hasContactCountry) {
+            $items = array_values(array_filter($items, fn($it) => $it['field'] !== 'company_country'));
+        }
+
+        // Dedupe: prefer unique field+value, then collapse to unique fields
+        $byPair = [];
+        foreach ($items as $it) {
+            $key = $it['field'] . '::' . $it['value'];
+            $byPair[$key] = $it;
+        }
+        $pairDeduped = array_values($byPair);
+
+        $byField = [];
+        foreach ($pairDeduped as $it) {
+            $byField[$it['field']] = $it; // keep last occurrence per field
+        }
+
+        $items = array_values($byField);
+        $hasJob = array_reduce($items, fn($c, $it) => $c || $it['field'] === 'job_title', false);
+        $hasCountry = array_reduce($items, fn($c, $it) => $c || $it['field'] === 'contact_country', false);
+        if ($hasJob && $hasCountry) {
+            $items = array_values(array_filter($items, fn($it) => in_array($it['field'], ['job_title', 'contact_country'])));
+        }
 
         return $items;
     }
+
+    // Removed parseCanonical as it is replaced by AiQueryTranslatorService
 
     protected function mergeFilters(array $current, array $generated): array
     {

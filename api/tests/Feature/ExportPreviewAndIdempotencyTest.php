@@ -21,7 +21,7 @@ it('returns preview counts and remaining balances', function () {
 
     $response->assertOk();
     $response->assertJsonStructure([
-        'email_count', 'phone_count', 'credits_required', 'remaining_before', 'remaining_after', 'contacts_included', 'companies_included',
+        'email_count', 'phone_count', 'credits_required', 'remaining_before', 'remaining_after', 'total_rows', 'can_export_free',
     ]);
 });
 

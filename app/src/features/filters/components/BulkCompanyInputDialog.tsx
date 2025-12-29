@@ -49,8 +49,8 @@ const BulkCompanyInputDialog: React.FC<Props> = ({ open, onOpenChange, onApplyFi
   const [parsedData, setParsedData] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  const sectionIdName = searchContext === "companies" ? "company_name_company" : "company_name_contact"
-  const sectionIdDomain = searchContext === "companies" ? "company_domain_company" : "company_domain_contact"
+  const sectionIdName = "company_name"
+  const sectionIdDomain = "company_domain"
 
   const tokens = useMemo(() => {
     if (tab === "csv") {
@@ -79,8 +79,7 @@ const BulkCompanyInputDialog: React.FC<Props> = ({ open, onOpenChange, onApplyFi
                 id: `${sectionIdDomain}_${nd}`,
                 name: nd,
                 type: "include"
-              },
-              isCompanyFilter: true
+              }
             })
           )
         }
@@ -94,8 +93,7 @@ const BulkCompanyInputDialog: React.FC<Props> = ({ open, onOpenChange, onApplyFi
                 id: `${sectionIdName}_${nn}`,
                 name: nn,
                 type: "include"
-              },
-              isCompanyFilter: true
+              }
             })
           )
         }

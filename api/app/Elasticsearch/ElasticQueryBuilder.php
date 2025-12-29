@@ -345,21 +345,32 @@ class ElasticQueryBuilder
 
         if ($this->pagination) {
             [$from, $size] = $this->pagination;
-            $query['from'] = $from;
-            $query['size'] = $size;
+            if ($this->searchAfter) {
+                $query['size'] = $size;
+            } else {
+                $query['from'] = $from;
+                $query['size'] = $size;
+            }
         }
 
-        // Inject filters into KNN for pre-filtering if they exist
         $knnStub = null;
         if ($this->knn) {
             $knnStub = $this->knn;
-            // Map 'filter' clauses to KNN filter
-            if (!empty($this->boolClauses['filter'])) {
-                // Determine if we wrap in bool or pass array. KNN filter expects a Query.
-                $filterQuery = count($this->boolClauses['filter']) === 1
-                    ? $this->boolClauses['filter'][0]
-                    : ['bool' => ['filter' => $this->boolClauses['filter']]];
-
+            $filters = $this->boolClauses['filter'] ?? [];
+            $exclusions = $this->boolClauses['must_not'] ?? [];
+            if (!empty($filters) || !empty($exclusions)) {
+                if (count($filters) === 1 && empty($exclusions)) {
+                    $filterQuery = $filters[0];
+                } else {
+                    $bool = [];
+                    if (!empty($filters)) {
+                        $bool['filter'] = $filters;
+                    }
+                    if (!empty($exclusions)) {
+                        $bool['must_not'] = $exclusions;
+                    }
+                    $filterQuery = ['bool' => $bool];
+                }
                 $knnStub['filter'] = $filterQuery;
             }
         }

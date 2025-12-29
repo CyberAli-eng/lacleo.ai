@@ -40,11 +40,34 @@ class FilterManager
      */
     public function getActiveFilters(): Collection
     {
-        return Cache::remember('filters:active', self::CACHE_TTL['filters'], function () {
-            return Filter::active()
-                ->orderBy('filter_group_id')
-                ->orderBy('sort_order')
-                ->get();
+        // Use Registry as the single source of truth
+        $configs = \App\Services\FilterRegistry::getFilters();
+
+        return collect($configs)->map(function ($config) {
+            $attributes = [
+                'filter_id' => $config['id'],
+                'name' => $config['label'],
+                'group' => $config['group'], // Group Name
+                'filter_group_id' => 1, // Placeholder
+                'value_source' => $config['data_source'],
+                'value_type' => $config['type'],
+                'input_type' => $config['input'],
+                'is_searchable' => $config['search']['enabled'] ?? false,
+                'allows_exclusion' => $config['filtering']['supports_exclusion'] ?? false,
+                'settings' => [
+                    'fields' => $config['fields'],
+                    'search_fields' => $config['search']['suggest_fields'] ?? [],
+                    'target_model' => in_array('contact', $config['applies_to']) ? \App\Models\Contact::class : \App\Models\Company::class,
+                ],
+                'sort_order' => $config['sort_order'],
+                'is_active' => $config['active'],
+                'supports_value_lookup' => in_array($config['data_source'], ['elasticsearch', 'predefined']),
+                'filter_type' => $config['type'],
+            ];
+
+            $filter = new Filter($attributes);
+            $filter->type = $config['type']; // Add type for factory dispatch
+            return $filter;
         });
     }
 
@@ -59,27 +82,107 @@ class FilterManager
     /**
      * Apply multiple filters to a query
      *
-     * @param  array  $filters  Array of [type => string, values => array of [id, text, selectionType]]
+     * @param  array  $filters  Array of [filter_id => value] (DSL)
      */
-    public function applyFilters(ElasticQueryBuilder $query, array $filters): ElasticQueryBuilder
+    public function applyFilters(ElasticQueryBuilder $query, array $filters, string $context = 'company'): ElasticQueryBuilder
     {
-        foreach ($filters as $filter) {
-            $filterModel = $this->getFilter($filter['type']);
+        $orderedFilters = $this->sortFilters($filters);
+
+        foreach ($orderedFilters as $filterId => $value) {
+            $filterModel = $this->getFilter($filterId);
+            if (! $filterModel) {
+                \Log::warning('FilterManager: Unknown filter ID ignored', ['filter_id' => $filterId]);
+                continue;
+            }
+
+            $normalized = $this->normalizeFilterValue($value);
+
+            // Enforce exclusion support
+            if (!empty($normalized['exclude'] ?? []) && ! ($filterModel->allows_exclusion ?? false)) {
+                \Log::warning('FilterManager: Exclusions not supported for filter, removing', ['filter_id' => $filterId]);
+                $normalized['exclude'] = [];
+            }
+
             $handler = $this->getHandler($filterModel);
-
-            $filterData = [
-                'filter_id' => $filter['type'],
-                'values' => array_map(fn ($v) => [
-                    'id' => $v['id'],
-                    'value' => $v['text'],
-                    'excluded' => ! $handler->supportsExclusion() ? false : $v['selectionType'] !== 'INCLUDED',
-                ], $filter['values']),
-            ];
-
-            $query = $handler->apply($query, $filterData['values']);
+            $query = $handler->apply($query, $normalized, $context);
         }
 
         return $query;
+    }
+
+    protected function sortFilters(array $filters): array
+    {
+        // Priority: boolean > range > terms (keyword) > term (text/direct)
+        $priorityMap = [
+            'boolean' => 1,
+            'range' => 2,
+            'date' => 2,
+            'keyword' => 3,
+            'text' => 4,
+            'direct' => 4,
+        ];
+
+        $sortedKeys = array_keys($filters);
+        usort($sortedKeys, function ($a, $b) use ($priorityMap) {
+            $filterA = $this->getFilter($a);
+            $filterB = $this->getFilter($b);
+            
+            $typeA = $filterA->type ?? 'text';
+            $typeB = $filterB->type ?? 'text';
+
+            $pA = $priorityMap[$typeA] ?? 10;
+            $pB = $priorityMap[$typeB] ?? 10;
+
+            return $pA <=> $pB;
+        });
+
+        $sortedFilters = [];
+        foreach ($sortedKeys as $key) {
+            $sortedFilters[$key] = $filters[$key];
+        }
+
+        return $sortedFilters;
+    }
+
+    protected function normalizeFilterValue(mixed $value): array
+    {
+        $out = [
+            'include' => [],
+            'exclude' => [],
+            'range' => null,
+            'presence' => null,
+            'operator' => null,
+        ];
+
+        if (is_array($value)) {
+            if (isset($value['include']) && is_array($value['include'])) {
+                $out['include'] = array_values(array_filter($value['include'], fn($v) => is_string($v) || is_numeric($v)));
+            }
+            if (isset($value['exclude']) && is_array($value['exclude'])) {
+                $out['exclude'] = array_values(array_filter($value['exclude'], fn($v) => is_string($v) || is_numeric($v)));
+            }
+            if (isset($value['range']) && is_array($value['range'])) {
+                $min = $value['range']['min'] ?? null;
+                $max = $value['range']['max'] ?? null;
+                $out['range'] = ['min' => is_numeric($min) ? (float) $min : null, 'max' => is_numeric($max) ? (float) $max : null];
+            }
+            if (isset($value['presence'])) {
+                $presence = $value['presence'];
+                if (in_array($presence, ['any', 'known', 'unknown'], true)) {
+                    $out['presence'] = $presence;
+                }
+            }
+            if (isset($value['operator'])) {
+                $op = $value['operator'];
+                if (in_array($op, ['and', 'or'], true)) {
+                    $out['operator'] = $op;
+                }
+            }
+        } elseif (is_string($value) || is_numeric($value)) {
+            $out['include'] = [$value];
+        }
+
+        return $out;
     }
 
     /**

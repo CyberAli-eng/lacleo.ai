@@ -12,6 +12,9 @@ class CreateTeamTest extends TestCase
 
     public function test_teams_can_be_created(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $this->post('/teams', [

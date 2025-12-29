@@ -6,7 +6,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "../input"
 import { useCreateSavedFilterMutation, useGetSavedFiltersQuery, useUpdateSavedFilterMutation } from "@/features/searchTable/slice/apiSlice"
 import { useSelector } from "react-redux"
-import { selectCompanyFilters, selectContactFilters } from "@/features/filters/slice/filterSlice"
+import { selectSelectedItems, selectActiveFilters } from "@/features/filters/slice/filterSlice"
+import { serializeToDSL } from "@/features/filters/adapter/querySerializer"
 import { useToast } from "../use-toast"
 import { SavedFilter } from "@/interface/searchTable/search"
 
@@ -27,8 +28,8 @@ const SaveFilter = ({ open, onOpenChange, entityType = "contact" }: SaveFilterPr
   const [updateFilter, { isLoading: isUpdating }] = useUpdateSavedFilterMutation()
   const { data } = useGetSavedFiltersQuery({ type: entityType })
 
-  const contactFilters = useSelector(selectContactFilters)
-  const companyFilters = useSelector(selectCompanyFilters)
+  const selectedItems = useSelector(selectSelectedItems)
+  const activeFilters = useSelector(selectActiveFilters)
   const { toast } = useToast()
 
   const savedSearches = useMemo(() => data?.data || [], [data])
@@ -37,26 +38,15 @@ const SaveFilter = ({ open, onOpenChange, entityType = "contact" }: SaveFilterPr
   const selectedFilterName = savedSearches.find((s) => s.id === selectedFilterId)?.name
 
   const handleSave = async () => {
-    const filters = {
-      contact: contactFilters,
-      company: companyFilters
-    }
+    const filters = serializeToDSL(selectedItems, activeFilters)
 
     try {
       if (searchMode === "new") {
-        await createFilter({
-          name: newSearchName,
-          filters,
-          entity_type: entityType,
-          description: ""
-        }).unwrap()
+        await createFilter({ name: newSearchName, filters, entity_type: entityType, description: "" }).unwrap()
         toast({ title: "Filter saved successfully" })
       } else {
         if (!selectedFilterId) return
-        await updateFilter({
-          id: selectedFilterId,
-          filters
-        }).unwrap()
+        await updateFilter({ id: selectedFilterId, filters }).unwrap()
         toast({ title: "Filter updated successfully" })
       }
       onOpenChange(false)

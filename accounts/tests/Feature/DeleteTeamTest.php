@@ -13,6 +13,9 @@ class DeleteTeamTest extends TestCase
 
     public function test_teams_can_be_deleted(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $user->ownedTeams()->save($team = Team::factory()->make([
@@ -31,6 +34,9 @@ class DeleteTeamTest extends TestCase
 
     public function test_personal_teams_cant_be_deleted(): void
     {
+        if (!in_array(\Laravel\Jetstream\Features::teams(), config('jetstream.features', []), true)) {
+            $this->markTestSkipped('Teams feature is not enabled.');
+        }
         $this->actingAs($user = User::factory()->withPersonalTeam()->create());
 
         $this->delete('/teams/'.$user->currentTeam->id);

@@ -2,44 +2,40 @@
 
 namespace App\Models;
 
-use App\Casts\ClassCast;
-use App\Filters\FilterHandlerFactory;
-use Illuminate\Contracts\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Contracts\Support\Arrayable;
 use InvalidArgumentException;
 
-class Filter extends Model
+class Filter implements Arrayable
 {
-    use HasFactory;
+    public $filter_id;
+    public $name;
+    public $group;
+    public $value_source;
+    public $value_type;
+    public $input_type;
+    public $is_searchable;
+    public $allows_exclusion;
+    public $settings = [];
+    public $sort_order;
+    public $is_active;
+    public $type;
+    public $filter_type;
+    public $supports_value_lookup;
+    // Fallback property used in handlers if settings['fields'] is missing
+    public $elasticsearch_field;
 
-    protected $guarded = [];
-
-    protected $casts = [
-        'settings' => 'array',
-        'settings.target_model' => ClassCast::class,
-        'is_searchable' => 'boolean',
-        'allows_exclusion' => 'boolean',
-        'supports_value_lookup' => 'boolean',
-        'is_active' => 'boolean',
-        'sort_order' => 'integer',
-        'handler_class' => ClassCast::class,
-    ];
-
-    protected $attributes = [
-        'is_active' => true,
-    ];
-
-    public function filterGroup(): BelongsTo
+    public function __construct(array $attributes = [])
     {
-        return $this->belongsTo(FilterGroup::class, 'filter_group_id');
+        foreach ($attributes as $key => $value) {
+            if (property_exists($this, $key)) {
+                $this->$key = $value;
+            }
+        }
     }
 
-    public function filterValues(): HasMany
+    public function toArray()
     {
-        return $this->hasMany(FilterValue::class);
+        return get_object_vars($this);
     }
 
     public function getTargetModelOrFail()
@@ -47,26 +43,13 @@ class Filter extends Model
         $modelClass = $this->settings['target_model'] ?? null;
 
         if (! $modelClass || ! class_exists($modelClass)) {
+            // If we have a filter_id, use it for the error message, otherwise generic
+            $id = $this->filter_id ?? 'unknown';
             throw new InvalidArgumentException(
-                "Invalid or missing target model for filter: {$this->filter->filter_id}"
+                "Invalid or missing target model for filter: {$id}"
             );
         }
 
         return $modelClass;
-    }
-
-    public function scopeActive(Builder $query)
-    {
-        return $query->where('is_active', true);
-    }
-
-    public function scopeForModel(Builder $query, string $modelClass)
-    {
-        return $query->whereJsonContains('settings->target_model', $modelClass);
-    }
-
-    public function getHandler()
-    {
-        return app(FilterHandlerFactory::class)->make($this);
     }
 }

@@ -73,31 +73,30 @@ const contactsApi = enhancedApi.injectEndpoints({
         query: ({ domain }) => ({ url: `/logo?domain=${encodeURIComponent(domain)}` })
       }),
 
-  translateQuery: builder.mutation<
-  {
-    entity: "contacts" | "companies"
-    filters: { [key: string]: unknown }
-    summary?: string
-    semantic_query?: string | null
-    custom?: { label: string; value: string; type: string }[]
-  },
-  {
-    query: string
-    messages?: { role: string; content: string }[]
-    context?: { lastResultCount?: number | null }
-  }
->({
-  query: ({ query, messages, context }) => ({
-    url: "/ai/translate-query",
-    method: "POST",
-    body: {
-      query,
-      messages,
-      context
-    }
-  })
-}),
-
+      translateQuery: builder.mutation<
+        {
+          entity: "contacts" | "companies"
+          filters: { [key: string]: unknown }
+          summary?: string
+          semantic_query?: string | null
+          custom?: { label: string; value: string; type: string }[]
+        },
+        {
+          query: string
+          messages?: { role: string; content: string }[]
+          context?: { lastResultCount?: number | null }
+        }
+      >({
+        query: ({ query, messages, context }) => ({
+          url: "/ai/translate-query",
+          method: "POST",
+          body: {
+            query,
+            messages,
+            context
+          }
+        })
+      }),
 
       revealCompany: builder.mutation<
         {

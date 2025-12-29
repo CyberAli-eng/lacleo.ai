@@ -36,13 +36,14 @@ it('companies export preserves canonical headers and includes rows for companies
     $csv = ExportCsvBuilder::buildCompaniesCsv($companies, $contacts, false);
     $rows = rowsFromCsv($csv);
 
-    // PII present -> company PII headers
-    expect($rows[0])->toEqual(\App\Exports\ExportCsvBuilder::COMPANY_HEADERS_PII);
+    // Company-only headers per builder
+    expect($rows[0][0])->toBe('domain');
+    expect($rows[0][1])->toBe('name');
+    expect($rows[0][2])->toBe('website');
     $body = array_slice($rows, 1);
     expect(count($body))->toBe(2);
-    $acmeRow = collect($body)->first(fn ($r) => $r[10] === 'Acme Corp');
-    $betaRow = collect($body)->first(fn ($r) => $r[10] === 'Beta LLC');
-    // first_name + last_name columns
-    expect($acmeRow[1].' '.$acmeRow[2])->toBe('Jane Doe');
-    expect($betaRow[1].$betaRow[2])->toBe('');
+    $acmeRow = collect($body)->first(fn ($r) => $r[1] === 'Acme Corp');
+    $betaRow = collect($body)->first(fn ($r) => $r[1] === 'Beta LLC');
+    expect($acmeRow[1])->toBe('Acme Corp');
+    expect($betaRow[1])->toBe('Beta LLC');
 });

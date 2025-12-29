@@ -23,7 +23,7 @@ import { useSearchContactsQuery } from "./slice/apiSlice"
 import { useCompanyLogoQuery } from "./slice/apiSlice"
 import { Avatar } from "@/components/ui/avatar"
 import { openContactInfoForCompany } from "./slice/contactInfoSlice"
-import { buildSearchQuery } from "@/app/utils/buildSearchQuery"
+import { serializeToDSL } from "@/features/filters/adapter/querySerializer"
 import { useDebounce } from "@/app/hooks/useDebounce"
 
 const CompanyNameCell = ({ row }: { row: CompanyAttributes }) => {
@@ -114,12 +114,12 @@ export function CompaniesTable() {
 
   const activeFilters = useAppSelector(selectActiveFilters)
   const semanticQuery = useAppSelector(selectSemanticQuery)
-  const filterDsl = useMemo(() => buildSearchQuery(selectedFilters, activeFilters), [selectedFilters, activeFilters])
+  const filterDsl = useMemo(() => serializeToDSL(selectedFilters, activeFilters), [selectedFilters, activeFilters])
 
   // Debug: log the DSL being built
   useEffect(() => {
-    if (Object.keys(filterDsl.company).length > 0 || Object.keys(filterDsl.contact).length > 0) {
-      console.log("❄️ Built DSL:", JSON.stringify(filterDsl, null, 2))
+    if (filterDsl && (filterDsl.contact || filterDsl.company)) {
+      console.log("❄️ Filter DSL:", JSON.stringify(filterDsl, null, 2))
       console.log("❄️ Selected Filters Redux:", selectedFilters)
     }
   }, [filterDsl, selectedFilters])
@@ -129,7 +129,7 @@ export function CompaniesTable() {
       // Only include search term if it is valid (>= 2 chars) to avoid 422 errors
       ...(debouncedQueryValue && debouncedQueryValue.length >= 2 && { searchTerm: debouncedQueryValue }),
       ...(semanticQuery && { semantic_query: semanticQuery }),
-      ...(Object.keys(filterDsl).length > 0 && { filter_dsl: filterDsl })
+      ...(filterDsl && { filter_dsl: filterDsl })
     }),
     [debouncedQueryValue, semanticQuery, filterDsl]
   )
@@ -145,16 +145,16 @@ export function CompaniesTable() {
 
   const searchUrl = useMemo(() => {
     const url = buildSearchUrl(searchParams, queryParams)
-    if (Object.keys(filterDsl.company).length > 0 || Object.keys(filterDsl.contact).length > 0) {
-      console.log("❄️ Encoded Search URL:", url)
-    }
     return url
-  }, [searchParams, queryParams, filterDsl])
+  }, [searchParams, queryParams])
 
   const { data, isLoading, isFetching } = useSearchContactsQuery({ type: "company", buildParams: searchUrl }, { refetchOnMountOrArgChange: true })
 
   // Derive company_phone for selected companies from the search response
-  const companyData = (data as SearchApiResponse<CompanyAttributes> | undefined)?.data || []
+  const companyData = useMemo(() => {
+    const d = data as SearchApiResponse<CompanyAttributes> | undefined
+    return d?.data || []
+  }, [data])
 
   const selectedCompanyPhones = useMemo(() => {
     const matching = companyData.filter((item) => selectedCompanies.includes(item.id || ""))
@@ -174,7 +174,6 @@ export function CompaniesTable() {
   }, [companyData, selectedCompanies])
 
   // Debug: log phones for selected companies
-
 
   const sortableFields = ["company", "website", "company_linkedin_url"]
 

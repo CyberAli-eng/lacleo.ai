@@ -48,58 +48,45 @@ class AiQueryTranslatorService
             }
         }
 
+        // Build dynamic filter menu from registry
+        $registryFilters = \App\Services\FilterRegistry::getFilters();
+        $availableFilterList = collect($registryFilters)
+            ->map(fn($f) => "ID: {$f['id']} | Label: {$f['label']} | Group: {$f['group']}")
+            ->implode("\n");
+
         $systemPrompt = <<<EOT
-You are an AI that converts natural language into structured B2B search filters.
-You must ALWAYS output strict JSON. Never output text outside JSON. 
+You are a lead generation assistant. Convert the user's request into a JSON filter object.
+You must ALWAYS output strict JSON. Never output text outside JSON.
 Do not infer facts. Only translate the user's instructions into filters.
 
 {$contextPreamble}
 
-YOUR JOB:
-1. Analyze the entire CONVERSATION HISTORY to understand the current search context.
-2. Detect whether the query is about CONTACTS or COMPANIES.
-3. Extract only what the user explicitly describes or implies based on previous context.
-4. If the user says "refine" or "remove", modify the previous filters accordingly.
-5. Map natural-language terms into normalized filter fields.
-6. NEVER guess unknown company names, industries, or locations.
-7. Keep output minimal and safe.
+ONLY use the following Filter IDs:
+{$availableFilterList}
 
-NORMALIZED FIELDS YOU ARE ALLOWED TO USE:
+Rules:
+- If searching for people, put filters under the "contact" key.
+- If searching for companies, put filters under the "company" key.
+- Values must be arrays under "include". Ranges should use {"min": number, "max": number}.
+
+Entity Detection:
+- If job title terms are present (e.g., engineer, manager, cto, cfo, vp, ai engineer, data scientist, people), set "entity" to "contacts".
+- Else if company metrics (industry, employee_count, annual_revenue, technologies) are present, set "entity" to "companies".
+- Else default to "contacts".
+
+Example Output:
 {
-  "entity": "contacts" | "companies",
-  "filters": {},
-  "semantic_query": "Optional: A descriptive sentence for vector search if the user asks for concepts/lookalikes (e.g. 'Sustainable logistics companies' or 'Competitors to Stripe').",
-  "summary": "Short explanation of what filters were applied (e.g. 'Searching for SaaS companies in NY with Revenue > 1M')",
+  "entity": "contacts",
+  "filters": {
+    "contact": { "job_title": { "include": ["CEO"] } },
+    "company": { "company_city": { "include": ["London"] } }
+  },
+  "summary": "Searching for CEOs in London",
   "custom": []
 }
 
-EXAMPLES:
-
-User: "Find HR professionals from US"
-JSON:
-{
-    "entity": "contacts",
-    "filters": {},
-    "summary": "Searching for HR professionals in the United States."
-}
-
-User: "Marketing managers in UK with 5+ years experience"
-JSON:
-{
-    "entity": "contacts",
-    "filters": {},
-    "summary": "Searching for Marketing Managers in the UK with 5+ years of experience."
-}
-
 OUTPUT FORMAT:
-Return ONLY valid JSON:
-{
-  "entity": "...",
-  "filters": { ... },
-  "semantic_query": "...",
-  "summary": "...",
-  "custom": [...]
-}
+Return ONLY valid JSON.
 EOT;
 
         try {
@@ -163,7 +150,7 @@ EOT;
             // Ensure basics exist
             $result = [
                 'entity' => $data['entity'] ?? 'contacts',
-                'filters' => $data['filters'] ?? [],
+                'filters' => $data['filters'] ?? ['contact' => [], 'company' => []],
                 'semantic_query' => $data['semantic_query'] ?? null,
                 'summary' => $data['summary'] ?? 'Updated search filters based on your request.',
                 'custom' => $data['custom'] ?? [],
@@ -183,60 +170,18 @@ EOT;
      */
     private function applySafetyLogic(array $result, string $query): array
     {
-        // Convert filters to array format if needed
-        $filters = $result['filters'];
-        
-        // If query contains job words, ensure at least title or department
-        $jobWords = ['engineer', 'manager', 'vp', 'sales', 'cto', 'ceo', 'cfo', 'coo', 'cio', 'developer', 'designer', 'analyst', 'consultant', 'director', 'head'];
-        $hasJobWord = false;
-        foreach ($jobWords as $word) {
-            if (stripos($query, $word) !== false) {
-                $hasJobWord = true;
-                break;
-            }
+        if (!isset($result['filters']) || !is_array($result['filters'])) {
+            $result['filters'] = ['contact' => [], 'company' => []];
         }
-        
-        if ($hasJobWord && empty($filters)) {
-            // For backward compatibility with tests expecting array format
-            $result['filters'] = [['field' => 'title', 'operator' => '=', 'value' => '']];
+        if (!isset($result['filters']['contact']) || !is_array($result['filters']['contact'])) {
+            $result['filters']['contact'] = [];
         }
-        
-        // If query contains location words, add location.country
-        $locationWords = ['germany', 'india', 'usa', 'uk', 'france', 'canada', 'australia', 'berlin', 'london', 'new york', 'california', 'texas'];
-        $locationMap = [
-            'germany' => 'germany',
-            'india' => 'india', 
-            'usa' => 'united states',
-            'uk' => 'united kingdom',
-            'france' => 'france',
-            'canada' => 'canada',
-            'australia' => 'australia',
-            'berlin' => 'germany',
-            'london' => 'united kingdom',
-            'new york' => 'united states',
-            'california' => 'united states',
-            'texas' => 'united states'
-        ];
-        
-        foreach ($locationWords as $loc) {
-            if (stripos($query, $loc) !== false && isset($locationMap[$loc])) {
-                if (is_array($result['filters']) && !empty($result['filters'])) {
-                    // Check if location filter already exists
-                    $hasLocation = false;
-                    foreach ($result['filters'] as $filter) {
-                        if (isset($filter['field']) && $filter['field'] === 'location.country') {
-                            $hasLocation = true;
-                            break;
-                        }
-                    }
-                    if (!$hasLocation) {
-                        $result['filters'][] = ['field' => 'location.country', 'operator' => '=', 'value' => $locationMap[$loc]];
-                    }
-                }
-                break;
-            }
+        if (!isset($result['filters']['company']) || !is_array($result['filters']['company'])) {
+            $result['filters']['company'] = [];
         }
-        
+        if (!isset($result['entity'])) {
+            $result['entity'] = 'contacts';
+        }
         return $result;
     }
 
@@ -245,8 +190,7 @@ EOT;
      */
     private function getFallbackResponse(string $query): array
     {
-        // Still apply safety logic even in fallback
-        $result = ['entity' => 'contacts', 'filters' => [], 'summary' => 'Could not process search request.', 'semantic_query' => null, 'custom' => []];
-        return $this->applySafetyLogic($result, $query);
+        $result = ['entity' => 'contacts', 'filters' => ['contact' => [], 'company' => []], 'summary' => 'Could not process search request.', 'semantic_query' => null, 'custom' => []];
+        return $result;
     }
 }

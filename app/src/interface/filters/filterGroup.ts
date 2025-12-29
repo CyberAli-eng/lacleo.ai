@@ -5,7 +5,7 @@ export type IFilter = {
   is_searchable: boolean
   allows_exclusion: boolean
   supports_value_lookup: boolean
-  input_type: "text" | "select" | "multi_select" | "boolean" | "hierarchical"
+  input_type: "text" | "select" | "multi_select" | "toggle" | "range" | "hierarchical"
 }
 
 export type IFilterGroup = {

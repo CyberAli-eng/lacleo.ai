@@ -21,13 +21,13 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Eye, Mail, Phone, User2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import DownloadIcon from "../../static/media/icons/download-icon.svg?react"
-import { selectSelectedItems, selectActiveFilters } from "../filters/slice/filterSlice"
+import { selectSelectedItems, selectActiveFilters, selectSearchContext } from "../filters/slice/filterSlice"
 import { setLastResultCount, selectSemanticQuery, startSearch } from "../aisearch/slice/searchslice"
 import { DataTable } from "./baseDataTable"
 import { useSearchContactsQuery, useCompanyLogoQuery } from "./slice/apiSlice"
 import { CompanyAttributes } from "@/interface/searchTable/search"
 import { openContactInfoForContact } from "./slice/contactInfoSlice"
-import { buildSearchQuery } from "@/app/utils/buildSearchQuery"
+import { serializeToDSL } from "@/features/filters/adapter/querySerializer"
 import { useDebounce } from "@/app/hooks/useDebounce"
 
 const ContactCompanyCell = ({ row }: { row: ContactAttributes }) => {
@@ -58,7 +58,7 @@ const PhoneCountCell = ({ contact }: { contact: ContactAttributes }) => {
     phoneCount += contact.phone_numbers.length
   } else if (contact.phone_number) {
     phoneCount += 1
-  } else if ((contact as any)?.has_contact_phone === true) {
+  } else if ((contact as unknown as { has_contact_phone?: boolean })?.has_contact_phone === true) {
     phoneCount += 1
   }
 
@@ -144,15 +144,16 @@ export function ContactsTable() {
   }
 
   const activeFilters = useAppSelector(selectActiveFilters)
+  const searchContext = useAppSelector(selectSearchContext)
   const semanticQuery = useAppSelector(selectSemanticQuery)
-  const filterDsl = useMemo(() => buildSearchQuery(selectedFilters, activeFilters), [selectedFilters, activeFilters])
+  const filterDsl = useMemo(() => serializeToDSL(selectedFilters, activeFilters, searchContext), [selectedFilters, activeFilters, searchContext])
 
   const queryParams = useMemo(
     () => ({
       // Only include search term if it is valid (>= 2 chars) to avoid 422 errors
       ...(debouncedQueryValue && debouncedQueryValue.length >= 2 && { searchTerm: debouncedQueryValue }),
       ...(semanticQuery && { semantic_query: semanticQuery }),
-      ...(Object.keys(filterDsl).length > 0 && { filter_dsl: filterDsl })
+      ...(filterDsl && { filter_dsl: filterDsl })
     }),
     [debouncedQueryValue, semanticQuery, filterDsl]
   )

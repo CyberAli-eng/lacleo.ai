@@ -20,7 +20,7 @@ interface FilterHandlerInterface
      * @param  array  $values  Values to filter by
      * @param  bool  $exclude  Whether to exclude (rather than include) results matching these values
      */
-    public function apply(ElasticQueryBuilder $query, array $values): ElasticQueryBuilder;
+    public function apply(ElasticQueryBuilder $query, array $values, string $context = 'company'): ElasticQueryBuilder;
 
     /**
      * Get possible values for this filter

@@ -10,17 +10,18 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        Schema::create('saved_filters', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->foreignUuid('user_id')->constrained()->cascadeOnDelete();
-            $table->string('name');
-            $table->text('description')->nullable();
-            $table->json('filters'); // Stores the DSL
-            $table->string('entity_type'); // 'contact' or 'company'
-            $table->boolean('is_starred')->default(false);
-            $table->json('tags')->nullable(); // Optional tags
-            $table->timestamps();
-        });
+      Schema::create('saved_filters', function (Blueprint $table) {
+    $table->uuid('id')->primary();
+    $table->uuid('user_id')->index(); // Accounts user ID
+    $table->string('name');
+    $table->text('description')->nullable();
+    $table->json('filters');
+    $table->string('entity_type'); // 'contact' or 'company'
+    $table->boolean('is_starred')->default(false);
+    $table->json('tags')->nullable();
+    $table->timestamps();
+});
+
     }
 
     /**
