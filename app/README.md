@@ -1,78 +1,264 @@
-![reactjs-vite-tailwindcss-boilerplate](https://user-images.githubusercontent.com/16243531/217138979-b854309c-4742-4275-a705-f9fec5158217.jpg)
+# Frontend App - lacleo.ai
 
-# React Tailwindcss Boilerplate build with Vite
+## Overview
 
-This is a boilerplate build with Vite, React 18, TypeScript, Vitest, Testing Library, TailwindCSS 3, Eslint and Prettier.
+The `app` service is the React-based frontend application for lacleo.ai, providing the user interface for B2B contact and company search.
 
-## What is inside?
+## Tech Stack
 
-This project uses many tools like:
+- **Framework**: React 18
+- **State Management**: Redux Toolkit
+- **Routing**: React Router v6
+- **HTTP Client**: Axios
+- **UI Components**: Radix UI
+- **Styling**: Tailwind CSS
+- **Build Tool**: Vite
 
-- [Vite](https://vitejs.dev)
-- [ReactJS](https://reactjs.org)
-- [TypeScript](https://www.typescriptlang.org)
-- [Tailwindcss](https://tailwindcss.com)
-- [Eslint](https://eslint.org)
-- [Prettier](https://prettier.io)
+## Key Features
 
-## Getting Started
+### 1. Search Interface
+- Unified search for companies and contacts
+- Advanced filter panel with 23+ filters
+- Real-time search suggestions
+- Saved filter management
 
-### Install
+### 2. AI Search
+- Natural language query input
+- Automatic filter generation
+- Entity detection
 
-Create the project.
+### 3. Data Management
+- Contact/company reveal
+- CSV export
+- Bulk operations
 
-```bash
-pnpm dlx degit joaopaulomoraes/reactjs-vite-tailwindcss-boilerplate my-app
+### 4. Account & Billing
+- Credit usage tracking
+- Purchase credits
+- Subscription management
+
+## Project Structure
+
+```
+app/
+├── src/
+│   ├── app/
+│   │   ├── redux/
+│   │   │   └── store.ts
+│   │   └── hooks/
+│   ├── components/
+│   │   └── ui/              # Reusable UI components
+│   ├── features/
+│   │   ├── filters/         # Filter system
+│   │   ├── searchExecution/ # Search logic
+│   │   ├── aisearch/        # AI search
+│   │   └── billing/         # Billing UI
+│   ├── services/
+│   │   └── api/
+│   │       └── apiSlice.ts  # RTK Query API
+│   └── main.tsx
+├── public/
+└── index.html
 ```
 
-Access the project directory.
+## Environment Variables
 
-```bash
-cd my-app
+Create a `.env` file:
+
+```env
+VITE_API_URL=https://local-api.lacleo.test
+VITE_ACCOUNTS_URL=https://local-accounts.lacleo.test
+VITE_APP_NAME=lacleo.ai
 ```
 
-Install dependencies.
+## Installation
 
 ```bash
-pnpm install
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
 ```
 
-Serve with hot reload at <http://localhost:5173>.
+## Development
 
 ```bash
-pnpm run dev
+# Start dev server (with HMR)
+npm run dev
+
+# Type checking
+npm run type-check
+
+# Linting
+npm run lint
+
+# Format code
+npm run format
 ```
 
-### Lint
+## State Management
+
+### Redux Store Structure
+
+```typescript
+{
+  filters: {
+    activeFilters: {},
+    availableFilters: [],
+    filterValues: {}
+  },
+  searchExecution: {
+    results: [],
+    loading: false,
+    error: null
+  },
+  billing: {
+    credits: 0,
+    usage: []
+  }
+}
+```
+
+### Key Slices
+
+- **filterSlice**: Manages filter state and DSL generation
+- **searchExecutionSlice**: Handles search queries and results
+- **billingSlice**: Tracks credits and usage
+
+## API Integration
+
+All API calls use RTK Query via `apiSlice.ts`:
+
+```typescript
+// Example: Search endpoint
+const { data, isLoading } = useSearchQuery({
+  type: 'company',
+  filters: activeFilters,
+  page: 1
+});
+```
+
+### Authentication
+
+- Uses Sanctum for session-based auth
+- CSRF token automatically included
+- Credentials sent with every request
+
+## Filter System
+
+### Filter Types
+
+1. **Text Filters**: company_name, job_title, etc.
+2. **Multi-Select**: technologies, seniority, departments
+3. **Range**: employee_count, annual_revenue, total_funding
+4. **Boolean**: has_funding, email_exists
+
+### Filter DSL Generation
+
+Filters are converted to Elasticsearch DSL in `filterSlice.ts`:
+
+```typescript
+{
+  company: {
+    employee_count: {
+      range: { min: 10, max: 1000 }
+    }
+  }
+}
+```
+
+## Components
+
+### Key Components
+
+- **UnifiedFilters**: Main filter panel
+- **SearchTable**: Results table with pagination
+- **ActiveFilterChips**: Display active filters
+- **ExportModal**: CSV export interface
+- **CreditUsageModal**: Billing information
+
+### UI Components (Radix UI)
+
+- Dialog, Dropdown, Select, Slider
+- Tooltip, Popover, Checkbox
+- All styled with Tailwind CSS
+
+## Routing
+
+```
+/                    - Dashboard/Search
+/ai-search           - AI-powered search
+/saved-filters       - Manage saved filters
+/billing             - Credits and subscriptions
+/settings            - Account settings
+```
+
+## Performance Optimization
+
+- Code splitting with React.lazy()
+- Memoization with useMemo/useCallback
+- Virtual scrolling for large lists
+- Debounced search inputs
+- Redux state normalization
+
+## Testing
 
 ```bash
-pnpm run lint
+# Run tests
+npm run test
+
+# Run tests with coverage
+npm run test:coverage
+
+# Run E2E tests
+npm run test:e2e
 ```
 
-### Typecheck
+## Build & Deployment
 
 ```bash
-pnpm run typecheck
+# Production build
+npm run build
+
+# Analyze bundle size
+npm run build -- --analyze
+
+# Preview production build
+npm run preview
 ```
 
-### Build
+## Troubleshooting
 
-```bash
-pnpm run build
-```
+### CORS Issues
+- Ensure API service has correct CORS configuration
+- Check `VITE_API_URL` matches API service URL
+- Verify credentials are being sent
 
-### Test
+### Authentication Issues
+- Clear browser cookies
+- Check Sanctum configuration
+- Verify CSRF token is being sent
 
-```bash
-pnpm run test
-```
+### Filter Issues
+- Clear Redux state
+- Check filter DSL generation
+- Verify API filter configuration
 
-View and interact with your tests via UI.
+## Contributing
 
-```bash
-pnpm run test:ui
-```
+1. Follow React best practices
+2. Use TypeScript for type safety
+3. Write tests for new features
+4. Follow Tailwind CSS conventions
+5. Run linter before committing
 
 ## License
 
-This project is licensed under the MIT License.
+Proprietary - All rights reserved

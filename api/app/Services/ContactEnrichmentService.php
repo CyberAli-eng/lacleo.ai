@@ -57,11 +57,13 @@ class ContactEnrichmentService
      */
     public function createPrimeRoleContact(array $requestData): array
     {
-        Log::debug('Creating PrimeRole contact', [
-            'transaction_id' => $requestData['transaction_id'] ?? null,
-            'contact_data' => $requestData['contact'] ?? null,
-            'company_data' => $requestData['company'] ?? null,
-        ]);
+        if (config('app.debug')) {
+            Log::debug('Creating PrimeRole contact', [
+                'transaction_id' => $requestData['transaction_id'] ?? null,
+                'contact_data' => $requestData['contact'] ?? null,
+                'company_data' => $requestData['company'] ?? null,
+            ]);
+        }
 
         $contactData = $requestData['contact'];
         $companyData = $requestData['company'] ?? null;
@@ -83,7 +85,9 @@ class ContactEnrichmentService
             ],
         ];
 
-        Log::debug('Enrichment payload', ['payload' => $payload]);
+        if (config('app.debug')) {
+            Log::debug('Enrichment payload', ['payload' => $payload]);
+        }
 
         try {
             $response = Http::withToken($this->primeroleApiAuthToken)
@@ -93,10 +97,12 @@ class ContactEnrichmentService
                 ->post("{$this->primeroleBaseUrl}/contacts", $payload);
 
             if ($response->successful()) {
-                Log::debug('Successfully created PrimeRole contact', [
-                    'transaction_id' => $requestData['transaction_id'] ?? null,
-                    'status_code' => $response->status(),
-                ]);
+                if (config('app.debug')) {
+                    Log::debug('Successfully created PrimeRole contact', [
+                        'transaction_id' => $requestData['transaction_id'] ?? null,
+                        'status_code' => $response->status(),
+                    ]);
+                }
 
                 return [
                     'success' => true,
@@ -104,7 +110,7 @@ class ContactEnrichmentService
                 ];
             }
 
-            $errorMessage = 'Contact Erichnment: Failed to create contact'.$response->body();
+            $errorMessage = 'Contact Erichnment: Failed to create contact' . $response->body();
             Log::error($errorMessage, [
                 'status_code' => $response->status(),
                 'transaction_id' => $requestData['transaction_id'] ?? null,
@@ -121,7 +127,7 @@ class ContactEnrichmentService
                 'url' => "{$this->primeroleBaseUrl}/contacts",
                 'transaction_id' => $requestData['transaction_id'] ?? null,
             ]);
-            throw new Exception('Contact Erichnment: Failed to create contact'.$e->getMessage());
+            throw new Exception('Contact Erichnment: Failed to create contact' . $e->getMessage());
         }
     }
 
@@ -130,7 +136,9 @@ class ContactEnrichmentService
      */
     public function startEnrichment(string $contactId): array
     {
-        Log::debug('Starting enrichment process', ['contact_id' => $contactId]);
+        if (config('app.debug')) {
+            Log::debug('Starting enrichment process', ['contact_id' => $contactId]);
+        }
 
         $payload = [
             'records' => [
@@ -140,7 +148,9 @@ class ContactEnrichmentService
             ],
         ];
 
-        Log::debug('Enrichment payload', ['payload' => $payload]);
+        if (config('app.debug')) {
+            Log::debug('Enrichment payload', ['payload' => $payload]);
+        }
 
         try {
             $response = Http::withToken($this->primeroleApiAuthToken)
@@ -148,10 +158,12 @@ class ContactEnrichmentService
                 ->post("{$this->primeroleBaseUrl}/enrich", $payload);
 
             if ($response->successful()) {
-                Log::debug('Successfully started enrichment', [
-                    'contact_id' => $contactId,
-                    'status_code' => $response->status(),
-                ]);
+                if (config('app.debug')) {
+                    Log::debug('Successfully started enrichment', [
+                        'contact_id' => $contactId,
+                        'status_code' => $response->status(),
+                    ]);
+                }
 
                 return [
                     'success' => true,
@@ -159,7 +171,7 @@ class ContactEnrichmentService
                 ];
             }
 
-            $errorMessage = 'Failed to start enrichment: '.$response->body();
+            $errorMessage = 'Failed to start enrichment: ' . $response->body();
             Log::error($errorMessage, [
                 'status_code' => $response->status(),
                 'contact_id' => $contactId,
@@ -177,7 +189,7 @@ class ContactEnrichmentService
                 'contact_id' => $contactId,
                 'payload' => $payload,
             ]);
-            throw new Exception('Failed to start enrichment: '.$e->getMessage());
+            throw new Exception('Failed to start enrichment: ' . $e->getMessage());
         }
     }
 
@@ -186,7 +198,9 @@ class ContactEnrichmentService
      */
     public function checkEnrichmentStatus(string $contactId): array
     {
-        Log::debug('Checking enrichment status', ['contact_id' => $contactId]);
+        if (config('app.debug')) {
+            Log::debug('Checking enrichment status', ['contact_id' => $contactId]);
+        }
 
         try {
             $response = Http::withToken($this->primeroleApiAuthToken)
@@ -194,10 +208,12 @@ class ContactEnrichmentService
                 ->get("{$this->primeroleBaseUrl}/contacts/{$contactId}");
 
             if ($response->successful()) {
-                Log::debug('Successfully checked enrichment status', [
-                    'contact_id' => $contactId,
-                    'status_code' => $response->status(),
-                ]);
+                if (config('app.debug')) {
+                    Log::debug('Successfully checked enrichment status', [
+                        'contact_id' => $contactId,
+                        'status_code' => $response->status(),
+                    ]);
+                }
 
                 return [
                     'success' => true,
@@ -205,7 +221,7 @@ class ContactEnrichmentService
                 ];
             }
 
-            $errorMessage = 'Failed to check enrichment status: '.$response->body();
+            $errorMessage = 'Failed to check enrichment status: ' . $response->body();
             Log::error($errorMessage, [
                 'status_code' => $response->status(),
                 'contact_id' => $contactId,
@@ -221,7 +237,7 @@ class ContactEnrichmentService
                 'message' => $e->getMessage(),
                 'contact_id' => $contactId,
             ]);
-            throw new Exception('Failed to check enrichment status: '.$e->getMessage());
+            throw new Exception('Failed to check enrichment status: ' . $e->getMessage());
         }
     }
 }

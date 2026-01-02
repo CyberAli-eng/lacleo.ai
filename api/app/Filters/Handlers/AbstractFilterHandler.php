@@ -8,15 +8,17 @@ use App\Models\Filter;
 abstract class AbstractFilterHandler implements FilterHandlerInterface
 {
     public function __construct(
-        protected Filter $filter
-    ) {}
+        protected \App\Models\Filter $filter,
+        protected ?\App\Filters\FilterManager $manager = null
+    ) {
+    }
 
     public function supportsExclusion(): bool
     {
         return $this->filter->allows_exclusion;
     }
 
-    abstract public function getValues(?string $search = null, int $page = 1, int $perPage = 10): array;
+    abstract public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array;
 
     /**
      * Paginate an array of results
@@ -57,6 +59,27 @@ abstract class AbstractFilterHandler implements FilterHandlerInterface
                 'total_pages' => 0,
             ],
         ];
+    }
+
+    /**
+     * Wrap query in nested block if the field is a known nested field.
+     */
+    protected function wrapIfNested(string $field, array $query): array
+    {
+        $nestedPaths = ['emails', 'phone_numbers', 'company_obj.emails', 'company_obj.phone_numbers'];
+
+        foreach ($nestedPaths as $path) {
+            if ($field === $path || str_starts_with($field, $path . '.')) {
+                return [
+                    'nested' => [
+                        'path' => $path,
+                        'query' => $query
+                    ]
+                ];
+            }
+        }
+
+        return $query;
     }
 
     /**

@@ -2,8 +2,8 @@ export type FilterType = "company" | "contact"
 export type SelectionType = "include" | "exclude"
 
 export interface RangeFilterValue {
-  min?: number
-  max?: number
+  min?: number | string
+  max?: number | string
 }
 
 export interface ActiveFilter {
@@ -30,7 +30,11 @@ export interface FilterState {
   selectedItems: Record<string, SelectedFilter[]>
 
   searchContext: "contacts" | "companies"
-  activeFilters: {
+  draftFilters: {
+    contact: Record<string, ActiveFilter>
+    company: Record<string, ActiveFilter>
+  }
+  committedFilters: {
     contact: Record<string, ActiveFilter>
     company: Record<string, ActiveFilter>
   }

@@ -8,6 +8,7 @@ import contactInfoReducer from "@/features/searchTable/slice/contactInfoSlice"
 import { configureStore } from "@reduxjs/toolkit"
 import columnsReducer from "@/features/searchTable/slice/columnsSlice"
 import { apiSlice } from "./apiSlice"
+import searchExecutionReducer from "@/features/searchExecution/slice/searchExecutionSlice"
 
 export const store = configureStore({
   reducer: {
@@ -16,11 +17,12 @@ export const store = configureStore({
     alerts: alertsSliceReducer,
     filters: filtersSliceReducer,
     search: searchSliceReducer,
+    searchExecution: searchExecutionReducer,
     searchTable: searchTableViewReducer,
     companyDetails: companyDetailsReducer,
     contactInfo: contactInfoReducer,
     columns: columnsReducer
   },
-  middleware: (getDefaultMiddleware) => getDefaultMiddleware({ immutableCheck: false, serializableCheck: false }).concat(apiSlice.middleware),
+  middleware: (getDefaultMiddleware) => getDefaultMiddleware({ immutableCheck: { warnAfter: 100 }, serializableCheck: false }).concat(apiSlice.middleware),
   devTools: true
 })

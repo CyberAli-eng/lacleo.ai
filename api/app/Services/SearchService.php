@@ -20,6 +20,13 @@ class SearchService
         'contact' => Contact::class,
     ];
 
+    // Score difference threshold for tie-breaking (10%)
+    private const SCORE_DIFFERENCE_THRESHOLD = 0.1;
+
+    // Hard limit for pagination to prevent memory issues
+    private const MAX_PER_PAGE = 100;
+    private const MAX_PAGE_DEPTH = 10000; // Elasticsearch default
+
     private array $lastAppliedClauses = [];
 
     public function __construct(
@@ -43,32 +50,52 @@ class SearchService
     ): array {
         try {
             $page = max(1, (int) $page);
-            $perPage = max(1, min(100, (int) $perPage));
+            $perPage = max(1, min(self::MAX_PER_PAGE, (int) $perPage));
+
+            // Prevent deep pagination beyond ES limits
+            if (($page * $perPage) > self::MAX_PAGE_DEPTH) {
+                throw new InvalidArgumentException('Pagination depth exceeds maximum allowed. Please use search_after for deep pagination.');
+            }
+
             $modelClass = $this->getModelClass($type);
             $builder = $modelClass::elastic();
 
             $index = (new $modelClass())->getReadAlias();
             $builder->index($index);
 
-        // Apply canonical DSL respecting contact/company separation
-        if (isset($filterDsl['contact']) || isset($filterDsl['company'])) {
-            $contactFilters = is_array($filterDsl['contact'] ?? null) ? $filterDsl['contact'] : [];
-            $companyFilters = is_array($filterDsl['company'] ?? null) ? $filterDsl['company'] : [];
+            // Apply canonical DSL respecting contact/company separation
+            if (isset($filterDsl['contact']) || isset($filterDsl['company'])) {
+                $contactFilters = is_array($filterDsl['contact'] ?? null) ? $filterDsl['contact'] : [];
+                $companyFilters = is_array($filterDsl['company'] ?? null) ? $filterDsl['company'] : [];
 
-            if ($type === 'contact') {
-                if (!empty($contactFilters)) {
-                    $this->filterManager->applyFilters($builder, $contactFilters, 'contact');
+                if ($type === 'contact') {
+                    if (!empty($contactFilters)) {
+                        $this->filterManager->applyFilters($builder, $contactFilters, 'contact');
+                    }
+                    if (!empty($companyFilters)) {
+                        $domains = $this->resolveCompanyFiltersToDomains($companyFilters);
+                        if (!empty($domains)) {
+                            // Try both top-level website and company_obj.domain for robustness
+                            $builder->must([
+                                'bool' => [
+                                    'should' => [
+                                        ['terms' => ['website' => array_values($domains)]],
+                                        ['terms' => ['company_obj.domain' => array_values($domains)]],
+                                        ['terms' => ['company_obj.website' => array_values($domains)]]
+                                    ],
+                                    'minimum_should_match' => 1
+                                ]
+                            ]);
+                        } else {
+                            $builder->must(['match_none' => (object) []]);
+                        }
+                    }
+                } else {
+                    if (!empty($companyFilters)) {
+                        $this->filterManager->applyFilters($builder, $companyFilters, 'company');
+                    }
                 }
-                if (!empty($companyFilters)) {
-                    $this->filterManager->applyFilters($builder, $companyFilters, 'company');
-                }
-            } else {
-                if (!empty($companyFilters)) {
-                    $this->filterManager->applyFilters($builder, $companyFilters, 'company');
-                }
-                // Do not apply contact filters to company search in phase-1
             }
-        }
 
             // Apply standard keyword search if present
             $this->applySearchQuery($builder, $type, $modelClass::globalSearchFields(), $query);
@@ -147,7 +174,21 @@ class SearchService
                             $this->filterManager->applyFilters($builderNoAgg, $contactFilters, 'contact');
                         }
                         if (!empty($companyFilters)) {
-                            $this->filterManager->applyFilters($builderNoAgg, $companyFilters, 'company');
+                            $domains = $this->resolveCompanyFiltersToDomains($companyFilters);
+                            if (!empty($domains)) {
+                                $builderNoAgg->must([
+                                    'bool' => [
+                                        'should' => [
+                                            ['terms' => ['website' => array_values($domains)]],
+                                            ['terms' => ['company_obj.domain' => array_values($domains)]],
+                                            ['terms' => ['company_obj.website' => array_values($domains)]]
+                                        ],
+                                        'minimum_should_match' => 1
+                                    ]
+                                ]);
+                            } else {
+                                $builderNoAgg->must(['match_none' => (object) []]);
+                            }
                         }
                     } else {
                         if (!empty($companyFilters)) {
@@ -214,10 +255,12 @@ class SearchService
         $this->applySearchQuery($builder, $type, $modelClass::globalSearchFields(), $query);
         $this->applySorting($builder, $sorts);
         $body = $builder->toArray();
-        $body['_debug'] = [
-            'applied_clauses' => $this->lastAppliedClauses,
-            'index_used' => $index,
-        ];
+        if (config('app.debug')) {
+            $body['_debug'] = [
+                'applied_clauses' => $this->lastAppliedClauses,
+                'index_used' => $index,
+            ];
+        }
         return $body;
     }
 
@@ -250,7 +293,7 @@ class SearchService
     /**
      * Apply the canonical Apollo-style filter DSL to the ES query builder.
      */
-    
+
 
 
     /**
@@ -279,10 +322,10 @@ class SearchService
             $applies = $config['applies_to'] ?? [];
             $appliesToType = in_array($type, $applies, true);
             // For contact search, allow company facets as well when contact mapping is present
-            if ($type === 'contact' && ! $appliesToType && in_array('company', $applies, true)) {
+            if ($type === 'contact' && !$appliesToType && in_array('company', $applies, true)) {
                 $appliesToType = true;
             }
-            if (! $appliesToType) {
+            if (!$appliesToType) {
                 continue;
             }
 
@@ -366,7 +409,7 @@ class SearchService
             }
             $attributes['company'] = $attributes['company'] ?? ($attributes['name'] ?? null);
             $attributes['domain'] = $attributes['domain'] ?? ($attributes['company_domain'] ?? null);
-            $attributes['website'] = $attributes['website'] ?? $attributes['domain'] ?? null;
+            $attributes['website'] = $attributes['website'] ?? ($attributes['domain'] ?? null);
             if (!isset($attributes['company_linkedin_url'])) {
                 $attributes['company_linkedin_url'] = $attributes['linkedin_url'] ?? null;
             }
@@ -467,26 +510,37 @@ class SearchService
                 '_id' => $esId ?? ($attributes['id'] ?? null),
                 'attributes' => $attributes,
                 'highlights' => $item['highlights'] ?? null,
+                'score' => $item['raw']['_score'] ?? 0,
             ];
         }, $results['data']);
 
         // Secondary in-memory ordering to guarantee that within a page
-        // contacts/companies with phone/email bubble to the top even if ES
-        // scoring is identical.
+        // contacts/companies with phone/email bubble to the top ONLY if scores are very close.
         usort($items, function (array $a, array $b): int {
+            // Primarily respect Elasticsearch score (descending)
+            $scoreA = (float) ($a['score'] ?? 0);
+            $scoreB = (float) ($b['score'] ?? 0);
+
+            // If scores differ by more than threshold, respect the score
+            if (abs($scoreA - $scoreB) > ($scoreA * self::SCORE_DIFFERENCE_THRESHOLD)) {
+                return $scoreB <=> $scoreA;
+            }
+
+            // Otherwise, use contact info as tie-breaker
             $aPhone = !empty($a['attributes']['has_contact_phone']);
             $bPhone = !empty($b['attributes']['has_contact_phone']);
             if ($aPhone !== $bPhone) {
-                return $aPhone ? -1 : 1;
+                return $bPhone <=> $aPhone;
             }
 
             $aEmail = !empty($a['attributes']['has_contact_email']);
             $bEmail = !empty($b['attributes']['has_contact_email']);
             if ($aEmail !== $bEmail) {
-                return $aEmail ? -1 : 1;
+                return $bEmail <=> $aEmail;
             }
 
-            return 0;
+            // Final fallback to raw score
+            return $scoreB <=> $scoreA;
         });
 
         $rawAggs = $results['aggregations'] ?? [];
@@ -513,9 +567,10 @@ class SearchService
             }
         }
 
-            return [
-                'data' => $items,
-                'meta' => [
+        return [
+            'data' => $items,
+            'total' => $results['total'], // Lifted for frontend compatibility
+            'meta' => [
                 'current_page' => $results['current_page'],
                 'per_page' => $results['per_page'],
                 'total' => $results['total'],
@@ -582,7 +637,7 @@ class SearchService
         return $out;
     }
 
-    
+
 
     private function expandAbbreviationSynonyms(string $term): array
     {
@@ -652,6 +707,12 @@ class SearchService
             return;
         }
 
+        if ($this->isEmailLike($query)) {
+            // Let general search handle it or add email-specific logic
+            $this->addGeneralSearch($builder, $searchConfig, $query);
+            return;
+        }
+
         if ($this->isDomainLike($query)) {
             $this->addDomainSpecificSearch($builder, $modelType, $query);
 
@@ -667,13 +728,19 @@ class SearchService
         $this->addGeneralSearch($builder, $searchConfig, $query);
     }
 
+    protected function isEmailLike(string $query): bool
+    {
+        return str_contains($query, '@') && preg_match('/^[^\s@]+@[^\s@]+\.[^\s@]+$/', $query);
+    }
+
     protected function isDomainLike(string $query): bool
     {
         return
-            str_contains($query, '.') ||
-            str_contains($query, 'www') ||
-            str_contains($query, 'http') ||
-            preg_match('/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/', $query);
+            !str_contains($query, '@') &&
+            (str_contains($query, '.') ||
+                str_contains($query, 'www') ||
+                str_contains($query, 'http') ||
+                preg_match('/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/', $query));
     }
 
     protected function addDomainSpecificSearch(ElasticQueryBuilder $builder, string $modelType, string $query): void
@@ -769,9 +836,37 @@ class SearchService
     private function addGeneralSearch(ElasticQueryBuilder $builder, array $searchConfig, string $query): void
     {
         $shouldClauses = [];
+        $query = trim($query);
 
-        $this->addExactMatches($shouldClauses, $searchConfig['exact_fields'], $query);
-        $this->addPhraseMatches($shouldClauses, $searchConfig['phrase_fields'], $query);
+        // 1. Exact / Phrase Matches (Highest priority)
+        if (isset($searchConfig['exact_fields'])) {
+            $this->addExactMatches($shouldClauses, $searchConfig['exact_fields'], $query);
+        }
+        if (isset($searchConfig['phrase_fields'])) {
+            $this->addPhraseMatches($shouldClauses, $searchConfig['phrase_fields'], $query);
+            $this->addPhrasePrefixMatches($shouldClauses, $searchConfig['phrase_fields'], $query);
+        }
+
+        // 2. Prefix / N-Gram Matches (Medium priority)
+        if (isset($searchConfig['prefix_fields'])) {
+            $this->addPrefixMatches($shouldClauses, $searchConfig['prefix_fields'], $query);
+        }
+        if (isset($searchConfig['ngram_fields'])) {
+            $this->addNGramMatches($shouldClauses, $searchConfig['ngram_fields'], $query);
+        }
+
+        // 3. Text Matches (Low priority)
+        if (isset($searchConfig['text_fields'])) {
+            $this->addTextMatches($shouldClauses, $searchConfig['text_fields'], $query);
+        }
+
+        // 4. Cross-Field Match (Handle multiple words in any order)
+        if (str_contains($query, ' ')) {
+            $this->addCrossFieldMatches($shouldClauses, $searchConfig, $query);
+        }
+
+        // 5. Fuzzy Match (Last resort for typos)
+        $this->addFuzzyMatches($shouldClauses, $searchConfig['text_fields'] ?? [], $query);
 
         foreach ($shouldClauses as $clause) {
             $builder->should($clause);
@@ -783,15 +878,34 @@ class SearchService
     protected function addExactMatches(array &$shouldClauses, array $fields, string $query): void
     {
         foreach ($fields as $field => $boost) {
-            $shouldClauses[] = [
+            $clause = [
                 'term' => [
                     $field => [
                         'value' => $query,
-                        'boost' => $boost * 3,
+                        'boost' => $boost * 50, // Massive boost for exact match
+                        'case_insensitive' => true,
                     ],
                 ],
             ];
+
+            $shouldClauses[] = $this->wrapIfNested($field, $clause);
         }
+    }
+
+    protected function wrapIfNested(string $field, array $query): array
+    {
+        $nestedPaths = ['emails', 'phone_numbers', 'company_obj.emails', 'company_obj.phone_numbers'];
+        foreach ($nestedPaths as $path) {
+            if ($field === $path || str_starts_with($field, $path . '.')) {
+                return [
+                    'nested' => [
+                        'path' => $path,
+                        'query' => $query,
+                    ],
+                ];
+            }
+        }
+        return $query;
     }
 
     protected function addPhraseMatches(array &$shouldClauses, array $fields, string $query): void
@@ -803,6 +917,21 @@ class SearchService
                         'query' => $query,
                         'boost' => $boost * 2,
                         'slop' => 1,  // Allow slight word position variations
+                    ],
+                ],
+            ];
+        }
+    }
+
+    protected function addPhrasePrefixMatches(array &$shouldClauses, array $fields, string $query): void
+    {
+        foreach ($fields as $field => $boost) {
+            $shouldClauses[] = [
+                'match_phrase_prefix' => [
+                    $field => [
+                        'query' => $query,
+                        'boost' => $boost * 1.5,
+                        'slop' => 2,
                     ],
                 ],
             ];
@@ -830,7 +959,7 @@ class SearchService
                 'match' => [
                     $field => [
                         'query' => $query,
-                        'boost' => $boost,
+                        'boost' => $boost * 1.5,
                         'operator' => 'and',
                     ],
                 ],
@@ -838,17 +967,71 @@ class SearchService
         }
     }
 
+    protected function addTextMatches(array &$shouldClauses, array $fields, string $query): void
+    {
+        foreach ($fields as $field => $boost) {
+            $shouldClauses[] = [
+                'match' => [
+                    $field => [
+                        'query' => $query,
+                        'boost' => $boost,
+                    ],
+                ],
+            ];
+        }
+    }
+
+    protected function addCrossFieldMatches(array &$shouldClauses, array $searchConfig, string $query): void
+    {
+        // Collect all text/phrase/prefix fields to try cross-matching, preserving boosts
+        $fieldsWithBoost = [];
+        $allFields = array_merge(
+            $searchConfig['phrase_fields'] ?? [],
+            $searchConfig['text_fields'] ?? [],
+            $searchConfig['prefix_fields'] ?? []
+        );
+
+        foreach ($allFields as $field => $boost) {
+            // Keep the maximum boost found for each field
+            if (!isset($fieldsWithBoost[$field]) || $boost > $fieldsWithBoost[$field]) {
+                $fieldsWithBoost[$field] = $boost;
+            }
+        }
+
+        if (!empty($fieldsWithBoost)) {
+            $formattedFields = [];
+            foreach ($fieldsWithBoost as $field => $boost) {
+                $formattedFields[] = "$field^$boost";
+            }
+
+            $shouldClauses[] = [
+                'multi_match' => [
+                    'query' => $query,
+                    'type' => 'cross_fields',
+                    'fields' => $formattedFields,
+                    'operator' => 'and', // Require all words for this high-boost clause
+                    'boost' => 5,
+                ],
+            ];
+        }
+    }
+
     protected function addFuzzyMatches(array &$shouldClauses, array $fields, string $query): void
     {
+        if (empty($fields)) {
+            return;
+        }
+
+        $formattedFields = [];
+        foreach ($fields as $field => $boost) {
+            $formattedFields[] = "$field^" . ($boost * 0.5);
+        }
+
         $shouldClauses[] = [
             'multi_match' => [
                 'query' => $query,
                 'type' => 'best_fields',
-                'fields' => array_map(
-                    fn($field, $boost) => "$field^$boost",
-                    array_keys($fields),
-                    array_values($fields)
-                ),
+                'fields' => $formattedFields,
                 'fuzziness' => 'AUTO',
                 'prefix_length' => 2,
                 'tie_breaker' => 0.3,
@@ -856,7 +1039,7 @@ class SearchService
         ];
     }
 
-    
+
     /**
      * Resolves company filters into a list of matching company domains.
      * This allows "Contact search by Company properties" (Cross-Index Filtering).
@@ -871,6 +1054,27 @@ class SearchService
         }
 
         $builder = \App\Models\Company::elastic();
+        $this->filterManager->applyFilters($builder, $companyFilters, 'company');
+        $builder->select(['website', 'domain']);
+        $results = $builder->paginate(1, 40000);
+
+        $domains = [];
+        foreach ($results['data'] as $hit) {
+            $value = $hit['website'] ?? $hit['domain'] ?? null;
+            if (!empty($value)) {
+                $domains[] = $value;
+            }
+        }
+        return array_unique($domains);
+    }
+
+    private function old_resolveCompanyFiltersToDomains(array $companyFilters): array
+    {
+        if (empty($companyFilters)) {
+            return [];
+        }
+
+        $builder = \App\Models\Company::elastic();
         $builder->index((new \App\Models\Company())->elasticIndex());
 
         $must = [];
@@ -879,15 +1083,15 @@ class SearchService
 
         // Map contact DSL company filters to actual company index filters
         $filterMap = [
-            'company_employee_count' => 'employee_count',
-            'company_headcount' => 'employee_count',
-            'employee_count' => 'employee_count',
-            'company_revenue' => 'annual_revenue',
-            'revenue' => 'annual_revenue',
-            'annual_revenue' => 'annual_revenue',
-            'company_business_category' => 'business_category',
-            'business_category' => 'business_category',
-            'businessCategories' => 'business_category',
+            'company_employee_count' => 'employees',
+            'company_headcount' => 'employees',
+            'employee_count' => 'employees',
+            'company_revenue' => 'annualRevenue',
+            'revenue' => 'annualRevenue',
+            'annual_revenue' => 'annualRevenue',
+            'company_business_category' => 'businessCategory',
+            'business_category' => 'businessCategory',
+            'businessCategories' => 'businessCategory',
             'company_technologies' => 'company_technologies',
             'technologies' => 'company_technologies',
             'company_locations' => 'location',
@@ -1077,7 +1281,7 @@ class SearchService
                     }
                     break;
 
-                
+
 
                 case 'foundedYear':
                     if (is_array($value)) {

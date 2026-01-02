@@ -22,7 +22,7 @@ export interface SearchState {
 const initialState: SearchState = {
   showResults: true,
   currentView: "initial",
-  isAiPanelCollapsed: false,
+  isAiPanelCollapsed: true,
   searchQuery: "",
   appliedCriteria: [],
   searchHistory: [],

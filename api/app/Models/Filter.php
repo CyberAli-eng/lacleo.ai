@@ -21,6 +21,7 @@ class Filter implements Arrayable
     public $type;
     public $filter_type;
     public $supports_value_lookup;
+    public $range;
     // Fallback property used in handlers if settings['fields'] is missing
     public $elasticsearch_field;
 
@@ -42,7 +43,7 @@ class Filter implements Arrayable
     {
         $modelClass = $this->settings['target_model'] ?? null;
 
-        if (! $modelClass || ! class_exists($modelClass)) {
+        if (!$modelClass || !class_exists($modelClass)) {
             // If we have a filter_id, use it for the error message, otherwise generic
             $id = $this->filter_id ?? 'unknown';
             throw new InvalidArgumentException(

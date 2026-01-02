@@ -3,7 +3,15 @@ import type { FilterDSL } from "@/features/filters/adapter/querySerializer"
 import { TRootState } from "@/interface/reduxRoot/state"
 import { PayloadAction, createSlice } from "@reduxjs/toolkit"
 
-const initialState: FilterState = {
+// REFACTOR: Single source of truth. No draft vs committed.
+interface SingleFilterState extends Omit<FilterState, "draftFilters" | "committedFilters"> {
+  activeFilters: {
+    contact: Record<string, ActiveFilter>
+    company: Record<string, ActiveFilter>
+  }
+}
+
+const initialState: SingleFilterState = {
   expandedSections: {},
   searchTerms: {},
   selectedItems: {},
@@ -18,11 +26,11 @@ const initialState: FilterState = {
 export const sectionToKey: Record<string, string> = {
   // Contact filters (use FilterRegistry IDs)
   job_title: "job_title",
-  departments: "departments", // specific to backend expectations if needed, but registry uses department? Validator maps department -> departments.
+  departments: "departments",
   seniority: "seniority",
-  contact_country: "countries",
-  contact_state: "states",
-  contact_city: "cities",
+  contact_country: "contact_country",
+  contact_state: "contact_state",
+  contact_city: "contact_city",
   contact_has_email: "work_email_exists",
   contact_has_phone: "mobile_number_exists",
   // Contact filters that join to company data
@@ -34,6 +42,8 @@ export const sectionToKey: Record<string, string> = {
   // Company filters (use FilterRegistry IDs)
   company_employee_count: "employee_count",
   employee_count: "employee_count",
+  company_headcount: "employee_count",
+  company_headcount_contact: "employee_count",
   company_revenue: "annual_revenue",
   company_revenue_range: "annual_revenue",
   annual_revenue: "annual_revenue",
@@ -41,9 +51,9 @@ export const sectionToKey: Record<string, string> = {
   founded_year: "founded_year",
   business_category: "business_category",
   company_technologies: "technologies",
-  company_country: "countries",
-  company_state: "states",
-  company_city: "cities",
+  company_country: "company_country",
+  company_state: "company_state",
+  company_city: "company_city",
   company_founded_year: "founded_year",
   company_domain: "company_domain",
   company_domain_company: "company_domain",
@@ -52,19 +62,37 @@ export const sectionToKey: Record<string, string> = {
   company_name_contact: "company_name",
   company_has_phone: "company_phone_exists",
   company_keywords: "keywords",
+  sic_codes: "sic_codes",
+  first_name: "first_name",
+  last_name: "last_name",
+  full_name: "full_name",
   company_names: "company_name"
 }
 
-function resolveBucket(state: FilterState, sectionId: string): "company" | "contact" {
+function resolveBucket(state: SingleFilterState, sectionId: string): "company" | "contact" {
   const key = sectionToKey[sectionId] || sectionId
-  // These keys MUST always go to the contact bucket regardless of page
-  const contactKeys = ["job_title", "departments", "seniority"]
-  if (state.searchContext === "companies") return "company"
-  return contactKeys.includes(key) ? "contact" : "company"
+  const contactOnlyIds = new Set([
+    "job_title",
+    "departments",
+    "seniority",
+    "contact_country",
+    "contact_state",
+    "contact_city",
+    "work_email_exists",
+    "personal_email_exists",
+    "mobile_number_exists",
+    "direct_number_exists",
+    "contact_linkedin_exists",
+    "first_name",
+    "last_name",
+    "full_name"
+  ])
+  if (contactOnlyIds.has(key) || sectionId.startsWith("contact_")) return "contact"
+  return "company"
 }
 
-function updateActiveFilters(
-  state: FilterState,
+function updateFilters(
+  state: SingleFilterState,
   sectionId: string,
   item: SelectedFilter,
   actionType: "add" | "remove",
@@ -116,10 +144,14 @@ export function getSectionIdFromKey(key: string, isCompanyFilter: boolean): stri
     // Contact filters (FilterRegistry IDs)
     job_title: "job_title",
     department: "departments",
+    departments: "departments",
     seniority: "seniority",
     contact_country: "contact_country",
+    countries: isCompanyFilter ? "company_country" : "contact_country",
     contact_state: "contact_state",
+    states: isCompanyFilter ? "company_state" : "contact_state",
     contact_city: "contact_city",
+    cities: isCompanyFilter ? "company_city" : "contact_city",
     work_email_exists: "contact_has_email",
     mobile_number_exists: "contact_has_phone",
     direct_number_exists: "contact_has_phone",
@@ -135,7 +167,10 @@ export function getSectionIdFromKey(key: string, isCompanyFilter: boolean): stri
     company_country: "company_country",
     company_state: "company_state",
     company_city: "company_city",
-    keywords: "company_keywords"
+    keywords: "company_keywords",
+    first_name: "first_name",
+    last_name: "last_name",
+    full_name: "full_name"
   }
   return keyToSection[key] || null
 }
@@ -179,7 +214,7 @@ const filterSlice = createSlice({
         state.selectedItems[sectionId].push(item)
       }
 
-      updateActiveFilters(state, sectionId, item, "add")
+      updateFilters(state, sectionId, item, "add")
     },
 
     removeSelectedItem: (
@@ -196,7 +231,7 @@ const filterSlice = createSlice({
         state.selectedItems[sectionId] = state.selectedItems[sectionId].filter((item) => item.id !== itemId)
 
         if (removedItem) {
-          updateActiveFilters(state, sectionId, removedItem, "remove")
+          updateFilters(state, sectionId, removedItem, "remove")
         }
       }
     },
@@ -237,7 +272,6 @@ const filterSlice = createSlice({
         "job_title",
         "departments",
         "seniority",
-        "years_of_experience",
         "contact_country",
         "contact_state",
         "contact_city",
@@ -262,7 +296,7 @@ const filterSlice = createSlice({
       state.selectedItems[sectionId] = (state.selectedItems[sectionId] || []).filter((item) => !item.id.startsWith(`range_${sectionId}_`))
       const rangeItem: SelectedFilter = { id: itemId, name, type: "include", value: range }
       state.selectedItems[sectionId].push(rangeItem)
-      updateActiveFilters(state, sectionId, rangeItem, "add")
+      updateFilters(state, sectionId, rangeItem, "add")
     },
 
     clearRangeFilter: (state, action: PayloadAction<{ sectionId: string }>) => {
@@ -299,7 +333,7 @@ const filterSlice = createSlice({
       }>
     ) => {
       const { contact, company } = action.payload
-      // Clear existing filters (inline)
+      // Clear existing filters
       state.expandedSections = {}
       state.searchTerms = {}
       state.selectedItems = {}
@@ -319,7 +353,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}`, name: itemName, type: "include" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", "contact")
+            updateFilters(state, sectionId, item, "add", "contact")
           })
         }
 
@@ -328,7 +362,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}_exclude`, name: itemName, type: "exclude" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", "contact")
+            updateFilters(state, sectionId, item, "add", "contact")
           })
         }
 
@@ -342,7 +376,7 @@ const filterSlice = createSlice({
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", "contact")
+          updateFilters(state, sectionId, rangeItem, "add", "contact")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
@@ -368,7 +402,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}`, name: itemName, type: "include" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", "company")
+            updateFilters(state, sectionId, item, "add", "company")
           })
         }
 
@@ -377,7 +411,7 @@ const filterSlice = createSlice({
             const item: SelectedFilter = { id: `${sectionId}_${itemName}_exclude`, name: itemName, type: "exclude" }
             if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
             state.selectedItems[sectionId].push(item)
-            updateActiveFilters(state, sectionId, item, "add", "company")
+            updateFilters(state, sectionId, item, "add", "company")
           })
         }
 
@@ -391,7 +425,7 @@ const filterSlice = createSlice({
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", "company")
+          updateFilters(state, sectionId, rangeItem, "add", "company")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
@@ -404,6 +438,7 @@ const filterSlice = createSlice({
       })
     },
     importFiltersFromCanonical: (state, action: PayloadAction<FilterDSL>) => {
+      // similar refactor using activeFilters instead of draft
       state.expandedSections = {}
       state.searchTerms = {}
       state.selectedItems = {}
@@ -420,13 +455,13 @@ const filterSlice = createSlice({
           const item: SelectedFilter = { id: `${sectionId}_${name}`, name, type: "include" }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(item)
-          updateActiveFilters(state, sectionId, item, "add", "contact")
+          updateFilters(state, sectionId, item, "add", "contact")
         })
         exc.forEach((name) => {
           const item: SelectedFilter = { id: `${sectionId}_${name}_exclude`, name, type: "exclude" }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(item)
-          updateActiveFilters(state, sectionId, item, "add", "contact")
+          updateFilters(state, sectionId, item, "add", "contact")
         })
         if (bucket.range) {
           const rangeItem: SelectedFilter = {
@@ -437,7 +472,7 @@ const filterSlice = createSlice({
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", "contact")
+          updateFilters(state, sectionId, rangeItem, "add", "contact")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
@@ -464,13 +499,13 @@ const filterSlice = createSlice({
           const item: SelectedFilter = { id: `${sectionId}_${name}`, name, type: "include" }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(item)
-          updateActiveFilters(state, sectionId, item, "add", "company")
+          updateFilters(state, sectionId, item, "add", "company")
         })
         exc.forEach((name) => {
           const item: SelectedFilter = { id: `${sectionId}_${name}_exclude`, name, type: "exclude" }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(item)
-          updateActiveFilters(state, sectionId, item, "add", "company")
+          updateFilters(state, sectionId, item, "add", "company")
         })
         if (bucket.range) {
           const rangeItem: SelectedFilter = {
@@ -481,7 +516,7 @@ const filterSlice = createSlice({
           }
           if (!state.selectedItems[sectionId]) state.selectedItems[sectionId] = []
           state.selectedItems[sectionId].push(rangeItem)
-          updateActiveFilters(state, sectionId, rangeItem, "add", "company")
+          updateFilters(state, sectionId, rangeItem, "add", "company")
         }
         if (bucket.operator) {
           const keyName = sectionToKey[sectionId] || sectionId
@@ -532,6 +567,9 @@ const filterSlice = createSlice({
       } else {
         state.activeFilters[bucket][key].fields = fields
       }
+    },
+    commitFilters: (state) => {
+      // Legacy No-op as active is always live
     }
   }
 })
@@ -552,15 +590,20 @@ export const {
   setBucketOperator,
   setFilterPresence,
   setFilterMode,
-  setFilterFields
+  setFilterFields,
+  commitFilters
 } = filterSlice.actions
 
-export const selectExpandedSections = (state: TRootState) => state.filters.expandedSections
-export const selectSearchTerms = (state: TRootState) => state.filters.searchTerms
-export const selectSelectedItems = (state: TRootState) => state.filters.selectedItems
-export const selectSearchContext = (state: TRootState) => state.filters.searchContext
-export const selectActiveFilters = (state: TRootState) => state.filters.activeFilters
-export const selectContactFilters = (state: TRootState) => state.filters.activeFilters.contact
-export const selectCompanyFilters = (state: TRootState) => state.filters.activeFilters.company
+export const selectExpandedSections = (state: TRootState) => state.filters.expandedSections || {}
+export const selectSearchTerms = (state: TRootState) => state.filters.searchTerms || {}
+export const selectSelectedItems = (state: TRootState) => state.filters.selectedItems || {}
+export const selectSearchContext = (state: TRootState) => state.filters.searchContext || "contacts"
+// Consolidated Selectors
+export const selectActiveFilters = (state: TRootState) => state.filters.activeFilters || { contact: {}, company: {} }
+// Legacy Mappings
+export const selectDraftFilters = selectActiveFilters
+export const selectCommittedFilters = selectActiveFilters
+export const selectContactFilters = (state: TRootState) => state.filters.activeFilters?.contact || {}
+export const selectCompanyFilters = (state: TRootState) => state.filters.activeFilters?.company || {}
 
 export default filterSlice.reducer

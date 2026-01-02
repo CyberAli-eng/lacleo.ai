@@ -15,10 +15,14 @@ const router = createBrowserRouter(
       <Route index element={<Navigate to="/app/search/contacts" />} />
       <Route path="/app" element={<RequireAuth />}>
         <Route index element={<Navigate to="search/contacts" />} />
-        <Route path="search" element={<SearchLayout />}>
-          <Route index element={<Navigate to="contacts" />} />
-          <Route path="contacts" element={<ContactsTable />} />
-          <Route path="companies" element={<CompaniesTable />} />
+        <Route path="search">
+          <Route element={<SearchLayout entity="contact" />}>
+            <Route index element={<Navigate to="contacts" />} />
+            <Route path="contacts" element={<ContactsTable />} />
+          </Route>
+          <Route element={<SearchLayout entity="company" />}>
+            <Route path="companies" element={<CompaniesTable />} />
+          </Route>
           <Route path="*" element={<Navigate to="contacts" replace />} />
         </Route>
         <Route path="lists" element={<Lists />} />

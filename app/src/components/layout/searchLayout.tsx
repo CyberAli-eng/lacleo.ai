@@ -3,8 +3,9 @@ import ContactInformation from "@/components/ui/contactinformation"
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import AISearchPage from "@/features/aisearch/AISearchPage"
-import { selectIsAiPanelCollapsed, selectSearchQuery, selectShowResults, startSearch, setShowResults } from "@/features/aisearch/slice/searchslice"
+import { selectIsAiPanelCollapsed, selectShowResults, startSearch, collapseAiPanel, expandAiPanel } from "@/features/aisearch/slice/searchslice"
 import Filters from "@/features/filters/filterSection"
+import { ActiveFilterChips } from "@/features/filters/components/ActiveFilterChips"
 import { selectIsCompanyDetailsOpen } from "@/features/searchTable/slice/companyDetailsSlice"
 import {
   closeContactInfo,
@@ -15,29 +16,42 @@ import {
 } from "@/features/searchTable/slice/contactInfoSlice"
 import { selectSearchTableView, setView } from "@/interface/searchTable/view"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { Building2, Save, Search, UsersRound, PanelLeft } from "lucide-react"
-import { useDispatch, useSelector } from "react-redux"
+import { Building2, PanelLeft, Save, Search, Sparkles, UsersRound } from "lucide-react"
+import { useEffect, useState } from "react"
+import { useSelector } from "react-redux"
 import { Outlet, useLocation } from "react-router-dom"
-import { useState, useEffect } from "react"
 import NavAnchor from "../utils/navAnchor"
+import { useAppDispatch } from "@/app/hooks/reduxHooks"
+import { setEntity } from "@/features/searchExecution/slice/searchExecutionSlice"
 
-const SearchLayout = () => {
-  const dispatch = useDispatch()
+interface SearchLayoutProps {
+  entity: "contact" | "company"
+}
+
+const SearchLayout = ({ entity }: SearchLayoutProps) => {
+  const dispatch = useAppDispatch()
+
+  // Selectors
   const showResults = useSelector(selectShowResults)
   const isAiPanelCollapsed = useSelector(selectIsAiPanelCollapsed)
   const isCompanyDetailsOpen = useSelector(selectIsCompanyDetailsOpen)
-  const currentView = useSelector(selectSearchTableView)
-  const searchQuery = useSelector(selectSearchQuery)
   const isContactInfoOpen = useSelector(selectIsContactInfoOpen)
   const contactInfoContact = useSelector(selectContactInfoContact)
   const contactInfoCompany = useSelector(selectContactInfoCompany)
   const { hideCompanyActions, hideContactFields } = useSelector(selectContactInfoFlags)
+  const currentView = useSelector(selectSearchTableView)
 
-  // Local state for sidebar visibility
+  // Local UI State
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const location = useLocation()
 
-  // Auto-show filters if navigating from AI Search logic (so user sees the transition)
+  // 1. Set Entity on Mount/Change
+  // This is purely for State Consistency, NOT Execution triggering.
+  useEffect(() => {
+    dispatch(setEntity(entity))
+  }, [dispatch, entity])
+
+  // 2. Auto-show filters from AI navigation
   useEffect(() => {
     const s = (location.state as Record<string, unknown> | null) || null
     if (s && "fromAi" in s && Boolean((s as { fromAi?: boolean }).fromAi)) {
@@ -45,9 +59,7 @@ const SearchLayout = () => {
     }
   }, [location.state])
 
-  // Do NOT auto-show results on route enter; results appear only after Apply
-  // Keep landing AI page until user applies filters
-
+  // Helper for Top Controls (Search/Saved Toggle + Search Bar)
   const renderTopControls = () => (
     <div className="my-3 flex items-center justify-between gap-3">
       {/* Left side - Toggle buttons */}
@@ -55,9 +67,8 @@ const SearchLayout = () => {
         <button
           type="button"
           onClick={() => dispatch(setView("search"))}
-          className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${
-            currentView === "search" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
-          }`}
+          className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${currentView === "search" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
+            }`}
         >
           <Search className="size-3.5" />
           Search
@@ -65,9 +76,8 @@ const SearchLayout = () => {
         <button
           type="button"
           onClick={() => dispatch(setView("savedFilters"))}
-          className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${
-            currentView === "savedFilters" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
-          }`}
+          className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-xs font-medium ${currentView === "savedFilters" ? "bg-white text-gray-950" : "text-gray-600 hover:bg-white hover:text-gray-950"
+            }`}
         >
           <Save className="size-3.5" />
           Saved Filters
@@ -120,13 +130,22 @@ const SearchLayout = () => {
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setIsFiltersOpen((prev) => !prev)}
-                className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${
-                  isFiltersOpen ? "text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"
-                }`}
+                className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${isFiltersOpen ? "text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"
+                  }`}
               >
                 <PanelLeft className="size-4" />
                 <span className="hidden sm:inline">{isFiltersOpen ? "Hide Filters" : "Show Filters"}</span>
               </button>
+
+              <button
+                onClick={() => dispatch(isAiPanelCollapsed ? expandAiPanel() : collapseAiPanel())}
+                className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${!isAiPanelCollapsed ? "text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"
+                  }`}
+              >
+                <Sparkles className="size-4" />
+                <span className="hidden sm:inline">{!isAiPanelCollapsed ? "Hide AI Chat" : "Generate Filters"}</span>
+              </button>
+
               <div className="h-4 w-px bg-gray-200 dark:bg-gray-800" />
               <nav className="flex space-x-3">
                 <NavAnchor
@@ -151,22 +170,24 @@ const SearchLayout = () => {
 
           <div className="flex flex-row">
             <div
-              className={`shrink-0 overflow-y-auto transition-all duration-300 ease-in-out ${
-                isFiltersOpen ? "w-80 opacity-100" : "w-0 overflow-hidden opacity-0"
-              }`}
+              className={`shrink-0 overflow-y-auto transition-all duration-300 ease-in-out ${isFiltersOpen ? "w-80 opacity-100" : "w-0 overflow-hidden opacity-0"
+                }`}
             >
-              <Filters />
+              <div className="py-4">
+                <Filters />
+              </div>
             </div>
             {showResults ? (
               <>
                 <div className="flex-1">
+                  <ActiveFilterChips entity={entity} />
                   <div className="p-6 pb-0 pr-0">
                     <Outlet />
                   </div>
                 </div>
 
                 {!isAiPanelCollapsed && (
-                  <aside className="ml-6 mt-[18px] w-96">
+                  <aside className="ml-6 mt-4 w-[450px] sticky top-4 h-[calc(100vh-2rem)] rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950 overflow-hidden">
                     <AISearchPage />
                   </aside>
                 )}

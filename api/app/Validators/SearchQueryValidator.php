@@ -41,13 +41,10 @@ class SearchQueryValidator
     {
         $errors = [];
 
-        // Validate model type
         if (! empty($params['type']) && ! in_array($params['type'], self::ALLOWED_TYPES)) {
             $errors['type'] = 'Invalid model type. Must be either company or contact.';
         }
 
-        // Validate search term from variables
-      // Allow empty searches - users can browse all results without filters or search terms (Apollo.io behavior)
         if (isset($params['variables']['searchTerm'])) {
             $searchTerm = $params['variables']['searchTerm'];
             
@@ -60,14 +57,7 @@ class SearchQueryValidator
                     $errors['searchTerm'] = 'Search term cannot exceed 100 characters.';
                 }
             }
-            // Empty search term is allowed - user can browse all results
         }
-        // No searchTerm provided is also allowed - user can browse all results
-
-        // Legacy filters array is no longer used by the SPA; canonical filter
-        // DSL arrives under variables.filter_dsl and is validated at field level
-        // inside the SearchService. We keep the old validation path for safety
-        // if filters[] is ever provided directly.
         if (! empty($params['variables']['filters']) && is_array($params['variables']['filters'])) {
             $filterErrors = $this->validateFilters($params['variables']['filters']);
             if (! empty($filterErrors)) {

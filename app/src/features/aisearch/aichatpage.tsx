@@ -1,398 +1,292 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import { useNavigate } from "react-router-dom"
-
-// UI Components
-import { MessageList } from "@/components/ui/aimessagelist"
-import AISearchInput from "@/components/ui/aisearchinput"
-import SearchConfirmation from "@/components/ui/searchconfirmation"
-import LacleoIcon from "../../static/media/avatars/lacleo_avatar.svg?react"
-import LoaderLines from "../../static/media/icons/loader-lines.svg?react"
-
-// Logic & Types
-import { AiChatPageProps, Message, SearchCriterion, SearchConfirmationProps } from "./types"
-import { FILTER_KEYS, FILTER_LABELS } from "../filters/utils/constants"
+import { motion, AnimatePresence } from "framer-motion"
+import { toast } from "sonner"
+import { Loader2, Sparkles, Send, CheckCircle2, ArrowRight } from "lucide-react"
 
 // Redux
 import {
-  applyCriteria,
   finishCriteriaProcessing,
   finishSearch,
-  startSearch,
-  selectIsProcessingCriteria,
-  selectSearchQuery,
   selectLastResultCount,
   setSemanticQuery,
-  collapseAiPanel,
   setShowResults,
-  setCurrentView,
-  setIsAiPanelCollapsed
 } from "./slice/searchslice"
-import { useGetFiltersQuery } from "../filters/slice/apiSlice"
+import { importFiltersFromDSL, resetFilters } from "../filters/slice/filterSlice"
 import { useTranslateQueryMutation } from "../searchTable/slice/apiSlice"
-import { addSelectedItem, resetFilters, importFiltersFromDSL } from "../filters/slice/filterSlice"
+
+// Components
+import AISearchInput from "@/components/ui/aisearchinput"
+import LacleoIcon from "../../static/media/avatars/lacleo_avatar.svg?react"
+
+// Types
+import { AiChatPageProps } from "./types"
+
+type ChatMessage = {
+  id: string
+  role: "user" | "ai"
+  content: string | React.ReactNode
+  timestamp: Date
+  filters?: any // The proposed DSL filters if present
+  entity?: "contacts" | "companies"
+}
 
 const AiChatPage: React.FC<AiChatPageProps> = ({ initialQuery }) => {
   const dispatch = useDispatch()
   const navigate = useNavigate()
-
-  // API Hooks
-  const { currentData: filterGroups = [] } = useGetFiltersQuery()
   const [translateQuery] = useTranslateQueryMutation()
-
-  // --- State ---
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0)
-  const [inferredEntity, setInferredEntity] = useState<"contacts" | "companies" | null>(null)
-  type DslBuckets = { contact: Record<string, unknown>; company: Record<string, unknown> } | null
-  const [pendingDsl, setPendingDsl] = useState<DslBuckets>(null)
-
-  // --- Selectors ---
   const lastResultCount = useSelector(selectLastResultCount)
 
-  // --- Refs (For async/closure stability) ---
-  const mountedRef = useRef(true)
-  const isProcessingRef = useRef(false)
-  const lastProcessedInitialQuery = useRef<string | null>(null)
-  const messagesRef = useRef<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const hasProcessedInitial = useRef(false)
 
+  // Auto-scroll to bottom
   useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, isLoading])
 
-  // --- Helpers ---
-  const addMessage = useCallback((message: Omit<Message, "id" | "timestamp">) => {
-    const newMessage: Message = {
-      ...message,
+  // Handle Initial Query if provided via navigation/props
+  useEffect(() => {
+    if (initialQuery && !hasProcessedInitial.current) {
+      hasProcessedInitial.current = true
+      handleSearch(initialQuery)
+    }
+  }, [initialQuery])
+
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) return
+
+    setIsLoading(true)
+    const newUserMsg: ChatMessage = {
       id: crypto.randomUUID(),
+      role: "user",
+      content: query,
       timestamp: new Date()
     }
-    setMessages((prev) => [...prev, newMessage])
-    return newMessage
-  }, [])
+    setMessages(prev => [...prev, newUserMsg])
 
-  const disablePreviousConfirmations = useCallback(() => {
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (React.isValidElement(m.component) && m.component.type === SearchConfirmation) {
-          return {
-            ...m,
-            component: React.cloneElement(m.component as React.ReactElement<SearchConfirmationProps>, { disabled: true })
-          }
-        }
-        return m
-      })
-    )
-  }, [])
+    try {
+      // History context for API
+      const history = messages
+        .filter(m => typeof m.content === 'string')
+        .map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.content as string }))
 
-  // Apply filters and navigate
-  const handleApplySearch = useCallback(
-    async (criteria: SearchCriterion[]) => {
-      disablePreviousConfirmations()
-      setIsLoading(true)
+      // Call Backend (TinyLlama / Ollama)
+      const res = await translateQuery({
+        query,
+        messages: history,
+        context: { lastResultCount }
+      }).unwrap()
 
-      dispatch(resetFilters())
-      if (pendingDsl) {
-        dispatch(importFiltersFromDSL(pendingDsl))
+      const dsl = res.filters
+      const summary = res.summary || "I've generated filters based on your request."
+      const entity = res.entity
+
+      // Add AI Response
+      const newAiMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: summary,
+        timestamp: new Date(),
+        filters: dsl,
+        entity: entity
+      }
+      setMessages(prev => [...prev, newAiMsg])
+
+      if (res.semantic_query) {
+        dispatch(setSemanticQuery(res.semantic_query))
       }
 
-      const target = inferredEntity === "contacts" ? "contacts" : "companies"
-      navigate(`/app/search/${target}`, { state: { fromAi: true } })
-
-      dispatch(setShowResults(true))
-      dispatch(finishSearch())
+    } catch (err) {
+      console.error(err)
+      toast.error("Failed to process request", { description: "Please try again or refine your query." })
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: "I encountered an error connecting to the AI service. Please try manually selecting filters.",
+        timestamp: new Date()
+      }])
+    } finally {
       setIsLoading(false)
-    },
-    [dispatch, navigate, pendingDsl, inferredEntity, disablePreviousConfirmations]
-  )
-
-  // --- Core Search Logic ---
-  const processQuery = useCallback(
-    async (query: string, isInitial = false) => {
-      if (isProcessingRef.current || (isInitial && lastProcessedInitialQuery.current === query)) return
-
-      isProcessingRef.current = true
-      if (isInitial) lastProcessedInitialQuery.current = query
-
-      setIsLoading(true)
-      addMessage({ type: "user", content: query })
-
-      // Prepare context for AI
-      const history = messagesRef.current
-        .filter((m) => m.type === "user" || m.type === "ai")
-        .map((m) => ({ role: m.type === "user" ? "user" : "assistant", content: m.content }))
-
-      try {
-        const response = await translateQuery({
-          query,
-          messages: [...history, { role: "user", content: query }],
-          context: { lastResultCount }
-        }).unwrap()
-
-        if (!mountedRef.current) return
-
-        // 1. Process Result Structure
-        const hasBuckets = !!(response.filters?.contact || response.filters?.company)
-        const flatFilters = hasBuckets ? { ...(response.filters.contact as object), ...(response.filters.company as object) } : response.filters
-
-        const criteria = mapBackendFiltersToCriteria(flatFilters, response.custom)
-        const dslUnified: { contact: Record<string, unknown>; company: Record<string, unknown> } = hasBuckets
-          ? (response.filters as { contact: Record<string, unknown>; company: Record<string, unknown> })
-          : buildDslFromResponse(response.filters, response.entity)
-
-        setInferredEntity(response.entity)
-        setPendingDsl(dslUnified)
-
-        // 2. Update Redux Search State
-        if (response.semantic_query) dispatch(setSemanticQuery(response.semantic_query))
-        dispatch(finishCriteriaProcessing())
-
-        // 3. UI Feedback
-        if (response.summary) addMessage({ type: "ai", content: response.summary })
-
-        // Show DSL JSON for transparency
-        addMessage({
-          type: "system",
-          content: "Filters (DSL):",
-          component: (
-            <pre className="max-h-48 overflow-auto rounded border bg-gray-50 p-3 text-sm text-gray-700">{JSON.stringify(dslUnified, null, 2)}</pre>
-          )
-        })
-
-        // Show criteria (button hidden) and auto-apply
-        addMessage({
-          type: "system",
-          content: "Applying these filters to your results.",
-          component: (
-            <SearchConfirmation criteria={criteria} onApply={() => handleApplySearch(criteria)} onCriterionChange={() => {}} applyButtonText="" />
-          )
-        })
-
-        // Auto-apply immediately
-        await handleApplySearch(criteria)
-      } catch (error) {
-        console.error("AI Search Error:", error)
-        addMessage({ type: "ai", content: "I'm having trouble connecting to my brain right now. Please try again or use manual filters." })
-      } finally {
-        if (mountedRef.current) setIsLoading(false)
-        isProcessingRef.current = false
-      }
-    },
-    [addMessage, translateQuery, lastResultCount, dispatch, handleApplySearch]
-  )
-  // --- Lifecycle Effects ---
-  useEffect(() => {
-    if (initialQuery) processQuery(initialQuery, true)
-    return () => {
-      mountedRef.current = false
     }
-  }, [initialQuery, processQuery])
+  }
 
-  useEffect(() => {
-    if (!isLoading) return
-    const interval = setInterval(() => {
-      setLoadingPhraseIndex((i) => (i + 1) % LOADING_PHRASES.length)
-    }, 1500)
-    return () => clearInterval(interval)
-  }, [isLoading])
+  const applyFilters = (dsl: any, entity: "contacts" | "companies") => {
+    dispatch(resetFilters())
+    dispatch(importFiltersFromDSL(dsl)) // Maps DSL to Redux State
+    dispatch(finishCriteriaProcessing())
+    dispatch(finishSearch())
+    dispatch(setShowResults(true))
+
+    // Navigate to correct entity view
+    const path = entity === "companies" ? "/app/search/companies" : "/app/search/contacts"
+    navigate(path, { state: { fromAi: true } })
+    toast.success("Filters Applied", { description: "Switching to results view." })
+  }
 
   return (
-    <div className="flex h-full flex-1 flex-col">
-      <div className="flex max-h-[calc(100vh-363px)] min-h-0 flex-1 flex-col overflow-auto">
-        <MessageList messages={messages} />
-
-        {!!isLoading && (
-          <div className="ml-6 flex animate-pulse items-end gap-[10px]">
-            <LacleoIcon />
-            <div className="rounded-[12px] border border-[#EBEBEB] bg-gray-50 px-6 py-[18px]">
-              <span className="flex items-center gap-2 text-base font-normal text-[#5C5C5C]">
-                <LoaderLines className="size-8" />
-                {LOADING_PHRASES[loadingPhraseIndex]}
-              </span>
+    <div className="flex h-full w-full flex-col bg-gray-50/50 dark:bg-gray-900/50">
+      {/* Chat Area */}
+      {/* Chat Area */}
+      <div className="flex-1 overflow-y-auto px-4 py-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-gray-200">
+        <div className="space-y-6">
+          {messages.length === 0 && !isLoading && (
+            <div className="mt-12 flex flex-col items-center justify-center space-y-4 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-blue-100 dark:bg-blue-900/30">
+                <Sparkles className="size-7 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">AI Search Assistant</h2>
+                <p className="max-w-xs mx-auto text-sm text-gray-500 dark:text-gray-400">
+                  Ask me to find anything. For example: "Find software engineers in London"
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          <AnimatePresence initial={false}>
+            {messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div className={`flex max-w-[90%] items-start gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+
+                  {/* Avatar */}
+                  <div className={`flex size-7 shrink-0 items-center justify-center rounded-full  ${msg.role === "ai" ? "bg-white shadow-sm" : "bg-blue-600"}`}>
+                    {msg.role === "ai" ? <LacleoIcon className="size-4" /> : <div className="text-[10px] font-bold text-white">ME</div>}
+                  </div>
+
+                  {/* Message Bubble */}
+                  <div className="flex flex-col gap-2 min-w-0"> {/* min-w-0 to prevent flex blowout */}
+                    <div
+                      className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm
+                      ${msg.role === "user"
+                          ? "bg-blue-600 text-white"
+                          : "bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100"}`}
+                    >
+                      {msg.content}
+                    </div>
+
+                    {/* Filter Preview Card */}
+                    {msg.role === "ai" && msg.filters && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                      >
+                        <div className="bg-gray-50 px-3 py-2 border-b border-gray-100 dark:bg-gray-800/50 dark:border-gray-700">
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Proposed Filters</span>
+                        </div>
+                        <div className="p-3">
+                          <FilterSummaryPreview dsl={msg.filters} />
+                        </div>
+                        <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                          <span className="text-xs text-gray-500">
+                            Target: <span className="font-medium text-gray-900 dark:text-gray-100 capitalize">{msg.entity || 'Mixed'}</span>
+                          </span>
+                          <button
+                            onClick={() => applyFilters(msg.filters, msg.entity || "contacts")}
+                            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 active:scale-95"
+                          >
+                            Apply <ArrowRight className="size-3" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {isLoading && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-start gap-3">
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white shadow-sm">
+                <LacleoIcon className="size-4" />
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                <Loader2 className="size-4 animate-spin text-blue-600" />
+                <span className="text-sm text-gray-500">Thinking...</span>
+              </div>
+            </motion.div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      <div className="bg-white p-4">
+      {/* Input Area */}
+      <div className="border-t border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
         <AISearchInput
-          onSearch={(q) => {
-            disablePreviousConfirmations()
-            processQuery(q)
-          }}
-          placeholder="Refine your search..."
+          onSearch={handleSearch}
+          placeholder="Ask AI..."
           disabled={isLoading}
+          className="shadow-sm"
         />
       </div>
     </div>
   )
 }
 
+// Minimal Component to visualizing DSL JSON nicely
+const FilterSummaryPreview = ({ dsl }: { dsl: any }) => {
+  const contact = dsl?.contact || {}
+  const company = dsl?.company || {}
+
+  const hasFilters = Object.keys(contact).length > 0 || Object.keys(company).length > 0
+  if (!hasFilters) return <div className="text-sm text-gray-500">No specific filters detected.</div>
+
+  const renderValue = (val: any) => {
+    if (val?.include) return val.include.join(", ")
+    if (val?.range) {
+      const { min, max } = val.range
+      if (min && max) return `${min} - ${max}`
+      if (min) return `${min}+`
+      if (max) return `< ${max}`
+    }
+    return JSON.stringify(val)
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+      {Object.keys(contact).length > 0 && (
+        <div>
+          <h4 className="mb-2 font-medium text-blue-600">Contact Filters</h4>
+          <ul className="space-y-1">
+            {Object.entries(contact).map(([k, v]) => (
+              <li key={k} className="flex gap-2">
+                <CheckCircle2 className="mt-0.5 size-3 text-emerald-500 shrink-0" />
+                <span className="text-gray-600 dark:text-gray-300">
+                  <strong className="text-gray-800 dark:text-gray-200 capitalize">{k.replace(/_/g, " ")}:</strong> {renderValue(v)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {Object.keys(company).length > 0 && (
+        <div>
+          <h4 className="mb-2 font-medium text-indigo-600">Company Filters</h4>
+          <ul className="space-y-1">
+            {Object.entries(company).map(([k, v]) => (
+              <li key={k} className="flex gap-2">
+                <CheckCircle2 className="mt-0.5 size-3 text-emerald-500 shrink-0" />
+                <span className="text-gray-600 dark:text-gray-300">
+                  <strong className="text-gray-800 dark:text-gray-200 capitalize">{k.replace(/_/g, " ")}:</strong> {renderValue(v)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default AiChatPage
-
-const LOADING_PHRASES: string[] = [
-  "Curating filters for your search…",
-  "Finding the most relevant results…",
-  "Scanning through data…",
-  "Sifting through possibilities…",
-  "Matching the best options for you…",
-  "Refining your filters…",
-  "Analyzing search parameters…",
-  "Narrowing it down for you…",
-  "Exploring all possibilities…"
-]
-
-type BackendCustomItem = { label?: string; value: string; type?: string }
-
-function mapBackendFiltersToCriteria(filters: Record<string, unknown>, customFilters: BackendCustomItem[] = []): SearchCriterion[] {
-  const out: SearchCriterion[] = []
-
-  const push = (id: string, label: string, value: string) => {
-    if (value && value.trim()) out.push({ id, label, value: value.trim(), checked: true })
-  }
-
-  const extractValues = (val: unknown): string[] => {
-    if (!val) return []
-    if (typeof val === "string") return [val]
-    if (Array.isArray(val)) return val.map(String)
-    if (typeof val === "object") {
-      const obj = val as { include?: unknown }
-      if (Array.isArray(obj.include)) return obj.include.map(String)
-      if (typeof obj.include === "string") return [obj.include]
-      return []
-    }
-    return [String(val)]
-  }
-
-  const formatRange = (val: unknown): string => {
-    const obj = (val || {}) as { gte?: number; lte?: number; min?: number; max?: number }
-    const g = obj.gte ?? obj.min
-    const l = obj.lte ?? obj.max
-    const toKMB = (n: number) =>
-      n >= 1_000_000_000 ? `${n / 1_000_000_000}B` : n >= 1_000_000 ? `${n / 1_000_000}M` : n >= 1_000 ? `${n / 1_000}K` : String(n)
-    if (g !== undefined && l !== undefined) return `${toKMB(g)}-${toKMB(l)}`
-    if (g !== undefined) return `${toKMB(g)}+`
-    if (l !== undefined) return `<${toKMB(l)}`
-    return ""
-  }
-
-  const handlers: Record<string, (v: unknown) => void> = {
-    [FILTER_KEYS.JOB_TITLE]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.JOB_TITLE, FILTER_LABELS[FILTER_KEYS.JOB_TITLE], x)),
-    [FILTER_KEYS.DEPARTMENTS]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.DEPARTMENTS, FILTER_LABELS[FILTER_KEYS.DEPARTMENTS], x)),
-    [FILTER_KEYS.SENIORITY]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.SENIORITY, FILTER_LABELS[FILTER_KEYS.SENIORITY], x)),
-    [FILTER_KEYS.COMPANY_NAME]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.COMPANY_NAME, FILTER_LABELS[FILTER_KEYS.COMPANY_NAME], x)),
-    [FILTER_KEYS.EMPLOYEE_COUNT]: (v) => push(FILTER_KEYS.EMPLOYEE_COUNT, FILTER_LABELS[FILTER_KEYS.EMPLOYEE_COUNT], formatRange(v)),
-    [FILTER_KEYS.REVENUE]: (v) => push(FILTER_KEYS.REVENUE, FILTER_LABELS[FILTER_KEYS.REVENUE], formatRange(v)),
-    [FILTER_KEYS.TECHNOLOGIES]: (v) => extractValues(v).forEach((x) => push(FILTER_KEYS.TECHNOLOGIES, FILTER_LABELS[FILTER_KEYS.TECHNOLOGIES], x)),
-    [FILTER_KEYS.COMPANY_KEYWORDS]: (v) =>
-      extractValues(v).forEach((x) => push(FILTER_KEYS.COMPANY_KEYWORDS, FILTER_LABELS[FILTER_KEYS.COMPANY_KEYWORDS], x)),
-    [FILTER_KEYS.BUSINESS_CATEGORY]: (v) =>
-      extractValues(v).forEach((x) => push(FILTER_KEYS.BUSINESS_CATEGORY, FILTER_LABELS[FILTER_KEYS.BUSINESS_CATEGORY], x)),
-    location: (v) => {
-      const loc = v as { include?: { countries?: unknown; states?: unknown; cities?: unknown }; country?: unknown; state?: unknown; city?: unknown }
-      const toValues = (val: unknown): string[] => (Array.isArray(val) ? val.map(String) : val ? [String(val)] : [])
-      const inc = (loc?.include || {}) as { countries?: unknown; states?: unknown; cities?: unknown }
-      toValues(inc.countries || loc.country).forEach((x) => push(FILTER_KEYS.CONTACT_LOCATION, "Location (Country)", x))
-      toValues(inc.states || loc.state).forEach((x) => push(FILTER_KEYS.CONTACT_LOCATION, "Location (State)", x))
-      toValues(inc.cities || loc.city).forEach((x) => push(FILTER_KEYS.CONTACT_CITY, "Location (City)", x))
-    },
-    company_domain: (v) => extractValues(v).forEach((x) => push("company_domain", "Company Domain", x.toLowerCase()))
-  }
-
-  for (const [key, val] of Object.entries(filters)) {
-    if (!val) continue
-    let normKey = key
-    if (key === "company") normKey = FILTER_KEYS.COMPANY_NAME
-    if (key === "company.revenue") normKey = FILTER_KEYS.REVENUE
-    if (key === "annual_revenue") normKey = FILTER_KEYS.REVENUE
-    if (key === "company.employee_count") normKey = FILTER_KEYS.EMPLOYEE_COUNT
-    if (key === "company_names") normKey = FILTER_KEYS.COMPANY_NAME
-    if (key === "company_name") normKey = FILTER_KEYS.COMPANY_NAME
-    if (key === "business_category") normKey = FILTER_KEYS.BUSINESS_CATEGORY
-    if (key === "technology") normKey = FILTER_KEYS.TECHNOLOGIES
-    if (key === "keywords") normKey = FILTER_KEYS.COMPANY_KEYWORDS
-    if (key === "countries" || key === "states" || key === "cities") normKey = "location"
-    if (handlers[normKey]) {
-      handlers[normKey](val)
-    } else if (handlers[key]) {
-      handlers[key](val)
-    }
-  }
-
-  customFilters.forEach((cf) => push(FILTER_KEYS.CUSTOM, cf.label || "Custom", cf.value))
-  if (out.length === 0) return [{ id: "general", label: "Search Type", value: "General Search", checked: true }]
-  return out
-}
-
-function buildDslFromResponse(
-  filters: Record<string, unknown>,
-  entity: "contacts" | "companies"
-): { contact: Record<string, unknown>; company: Record<string, unknown> } {
-  const dsl: { contact: Record<string, unknown>; company: Record<string, unknown> } = { contact: {}, company: {} }
-  const ensureInclude = (bucket: Record<string, unknown>, key: string, value: string) => {
-    const existing = (bucket[key] as { include?: string[]; exclude?: string[]; presence?: string } | undefined) || {}
-    const include = Array.isArray(existing.include) ? existing.include : []
-    bucket[key] = { ...existing, include: Array.from(new Set([...include, value])) }
-  }
-  const ensureExclude = (bucket: Record<string, unknown>, key: string, value: string) => {
-    const existing = (bucket[key] as { include?: string[]; exclude?: string[]; presence?: string } | undefined) || {}
-    const exclude = Array.isArray(existing.exclude) ? existing.exclude : []
-    bucket[key] = { ...existing, exclude: Array.from(new Set([...exclude, value])) }
-  }
-  const setRange = (bucket: Record<string, unknown>, key: string, val: unknown) => {
-    const range: { min?: number; max?: number } = {}
-    if (val && typeof val === "object") {
-      const obj = val as { gte?: number; lte?: number; min?: number; max?: number }
-      if (typeof obj.gte === "number") range.min = obj.gte
-      if (typeof obj.lte === "number") range.max = obj.lte
-      if (typeof obj.min === "number") range.min = obj.min
-      if (typeof obj.max === "number") range.max = obj.max
-    }
-    bucket[key] = range
-  }
-  for (const [key, val] of Object.entries(filters)) {
-    if (!val) continue
-    if (key === "title" || key === "job_title") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "job_title", String(v)))
-    } else if (key === "departments") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "departments", String(v)))
-    } else if (key === "seniority") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.contact, "seniority", String(v)))
-    } else if (key === "years_experience" || key === "years_of_experience") {
-      setRange(dsl.contact, "experience_years", val)
-    } else if (key === "location.country") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) =>
-        ensureInclude(entity === "companies" ? dsl.company : dsl.contact, entity === "companies" ? "countries" : "countries", String(v))
-      )
-    } else if (key === "state") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) =>
-        ensureInclude(entity === "companies" ? dsl.company : dsl.contact, entity === "companies" ? "states" : "states", String(v))
-      )
-    } else if (key === "city") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) =>
-        ensureInclude(entity === "companies" ? dsl.company : dsl.contact, entity === "companies" ? "cities" : "cities", String(v))
-      )
-    } else if (key === "business_category") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "business_category", String(v)))
-    } else if (key === "skills" || key === "technologies" || key === "company.technologies" || key === "technology") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "technologies", String(v)))
-    } else if (key === "company_size" || key === "company.employee_count" || key === "employee_count") {
-      setRange(dsl.company, "employee_count", val)
-    } else if (key === "revenue" || key === "company.revenue" || key === "annual_revenue") {
-      setRange(dsl.company, "annual_revenue", val)
-    } else if (key === "company_keywords" || key === "keywords") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "keywords", String(v)))
-    } else if (key === "company_names" || key === "company_name" || key === "company") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "company_name", String(v)))
-    } else if (key === "company_alias" || key === "company_also_known_as") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "company_alias", String(v)))
-    } else if (key === "company_domain") {
-      ;(Array.isArray(val) ? val : [val]).forEach((v) => ensureInclude(dsl.company, "company_domain", String(v).toLowerCase()))
-    } else if (key === "countries" || key === "states" || key === "cities") {
-      const arr = Array.isArray(val) ? val.map(String) : [String(val)]
-      arr.forEach((v) => ensureInclude(entity === "companies" ? dsl.company : dsl.contact, key, v))
-    }
-  }
-  return dsl
-}

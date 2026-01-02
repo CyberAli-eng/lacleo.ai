@@ -24,7 +24,7 @@ const AISearchPage: React.FC = () => {
   const showResults = useSelector(selectShowResults)
 
   const handleSearch = (query: string) => {
-    console.log("Searching for:", query)
+    // Searching
     dispatch(startSearch(query))
   }
 
@@ -33,11 +33,7 @@ const AISearchPage: React.FC = () => {
   }
 
   return (
-    <div
-      className={`flex min-h-[calc(100vh-205px)] flex-col rounded-[10px] border bg-white dark:bg-gray-900 ${
-        showResults ? "min-h-[calc(100vh-230px)]" : ""
-      }`}
-    >
+    <div className="flex h-full flex-col bg-white dark:bg-gray-900">
       {/* Header - always visible */}
       <div className="mx-4 flex items-center justify-between border-b border-gray-200 pb-[18px] pt-4">
         <div className="flex items-center gap-3">

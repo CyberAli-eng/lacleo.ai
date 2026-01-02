@@ -34,7 +34,7 @@ const SavedFiltersPage = () => {
         const exclude = Array.isArray(q.exclude_values) ? q.exclude_values.map(String) : []
         const range = q.range && (q.range.min !== undefined || q.range.max !== undefined) ? q.range : undefined
         const isCompany = id.startsWith("company_")
-        const bucket = isCompany ? (dsl.company![id] ||= {}) : (dsl.contact![id] ||= {})
+        const bucket = isCompany ? (dsl.company![id] ||= { include: [], exclude: [] }) : (dsl.contact![id] ||= { include: [], exclude: [] })
         if (include.length) bucket.include = include
         if (exclude.length) bucket.exclude = exclude
         if (range) bucket.range = { min: range.min, max: range.max }
@@ -47,8 +47,8 @@ const SavedFiltersPage = () => {
       }
     } else {
       const filters = payload as { contact?: Record<string, unknown>; company?: Record<string, unknown> }
-      const contact = (filters.contact || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
-      const company = (filters.company || {}) as Record<string, import("@/features/filters/adapter/querySerializer").FilterBucketEntry>
+      const contact = (filters.contact || {}) as Record<string, import("@/interface/filters/slice").ActiveFilter>
+      const company = (filters.company || {}) as Record<string, import("@/interface/filters/slice").ActiveFilter>
       const canonical: FilterDSL = { contact, company }
       dispatch(importFiltersFromCanonical(canonical))
       try {

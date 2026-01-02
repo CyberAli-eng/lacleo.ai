@@ -184,17 +184,18 @@ trait HasElasticIndex
 
     public static function searchInElastic(array $query, array $options = [])
     {
-        static::bootElasticModelTrait();
-        $instance = new static;
-
         try {
+            static::bootElasticModelTrait();
+            $instance = new static;
+
             return static::$elasticClient->search([
                 'index' => $instance->getIndexName(),
-                'body'  => $query,
+                'body' => $query,
             ]);
         } catch (\Throwable $e) {
             Log::error('Elasticsearch search failed', [
-                'index' => $instance->getIndexName(),
+                // 'index' might not be available if instantiation failed
+                'class' => static::class,
                 'error' => $e->getMessage(),
             ]);
 
@@ -218,7 +219,7 @@ trait HasElasticIndex
                 ->getClient()
                 ->exists([
                     'index' => $this->getIndexName(),
-                    'id'    => $this->getKey(),
+                    'id' => $this->getKey(),
                 ])
                 ->asBool();
         } catch (\Throwable) {

@@ -20,6 +20,7 @@ export function objectToVoyagerStringFormat(obj: Record<string, unknown>): strin
   }
 
   return `(${Object.entries(obj)
+    .filter(([_, v]) => v !== undefined && v !== null)
     .map(([k, v]) => `${k}:${convert(v)}`)
     .join(",")})`
 }

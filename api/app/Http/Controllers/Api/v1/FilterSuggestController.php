@@ -10,31 +10,33 @@ class FilterSuggestController extends Controller
 {
     public function companies(Request $request)
     {
-        $q = trim((string) $request->query('q', ''));
-        if ($q === '') {
-            return response()->json(['data' => []]);
-        }
-
-        $query = $this->buildSuggestQuery($q);
         try {
+            $q = trim((string) $request->query('q', ''));
+            if ($q === '') {
+                return response()->json(['data' => []]);
+            }
+
+            $query = $this->buildSuggestQuery($q);
             $res = Company::searchInElastic($query);
+
+            $out = [];
+            foreach (($res['hits']['hits'] ?? []) as $hit) {
+                $src = $hit['_source'] ?? [];
+                $out[] = [
+                    'id' => $hit['_id'] ?? null,
+                    'name' => $src['company'] ?? ($src['name'] ?? null),
+                    'domain' => $src['website'] ?? ($src['domain'] ?? null),
+                    'employee_count' => $src['number_of_employees'] ?? ($src['employee_count'] ?? ($src['employees'] ?? null)),
+                ];
+                if (count($out) >= 20)
+                    break;
+            }
+
+            return response()->json(['data' => $out]);
         } catch (\Throwable $e) {
+            // Log::error($e); // Optional logging
             return response()->json(['data' => []]);
         }
-
-        $out = [];
-        foreach (($res['hits']['hits'] ?? []) as $hit) {
-            $src = $hit['_source'] ?? [];
-            $out[] = [
-                'id' => $hit['_id'] ?? null,
-                'name' => $src['company'] ?? ($src['name'] ?? null),
-                'domain' => $src['website'] ?? ($src['domain'] ?? null),
-                'employee_count' => $src['number_of_employees'] ?? ($src['employee_count'] ?? ($src['employees'] ?? null)),
-            ];
-            if (count($out) >= 20) break;
-        }
-
-        return response()->json(['data' => $out]);
     }
 
     private function buildSuggestQuery(string $q): array
@@ -144,10 +146,12 @@ class FilterSuggestController extends Controller
             }
         }
 
-        return response()->json(['data' => [
-            'found_names' => array_values(array_unique($foundNames)),
-            'found_domains' => array_values(array_unique($foundDomains)),
-        ]]);
+        return response()->json([
+            'data' => [
+                'found_names' => array_values(array_unique($foundNames)),
+                'found_domains' => array_values(array_unique($foundDomains)),
+            ]
+        ]);
     }
 
     public function existencePost(Request $request)
@@ -217,10 +221,12 @@ class FilterSuggestController extends Controller
             }
         }
 
-        return response()->json(['data' => [
-            'found_names' => array_values(array_unique($foundNames)),
-            'found_domains' => array_values(array_unique($foundDomains)),
-        ]]);
+        return response()->json([
+            'data' => [
+                'found_names' => array_values(array_unique($foundNames)),
+                'found_domains' => array_values(array_unique($foundDomains)),
+            ]
+        ]);
     }
 
     public function bulkApply(Request $request)
@@ -258,12 +264,14 @@ class FilterSuggestController extends Controller
         }
 
         if (empty($should)) {
-            return response()->json(['data' => [
-                'applied' => [],
-                'skipped' => [],
-                'type' => $type,
-                'searchContext' => $searchContext,
-            ]]);
+            return response()->json([
+                'data' => [
+                    'applied' => [],
+                    'skipped' => [],
+                    'type' => $type,
+                    'searchContext' => $searchContext,
+                ]
+            ]);
         }
 
         $query = [
@@ -320,11 +328,13 @@ class FilterSuggestController extends Controller
             }
         }
 
-        return response()->json(['data' => [
-            'applied' => array_values(array_unique($applied)),
-            'skipped' => array_values(array_unique($skipped)),
-            'type' => $type,
-            'searchContext' => $searchContext,
-        ]]);
+        return response()->json([
+            'data' => [
+                'applied' => array_values(array_unique($applied)),
+                'skipped' => array_values(array_unique($skipped)),
+                'type' => $type,
+                'searchContext' => $searchContext,
+            ]
+        ]);
     }
 }

@@ -39,6 +39,12 @@ export function normalizeFilters(apiGroups: IFilterGroup[]): NormalizedFilterGro
 }
 
 function inferRange(filter: IFilter): NormalizedFilter["range"] {
+  // Respect server-driven range metadata if provided
+  const serverRange = (filter as any).range
+  if (serverRange && typeof serverRange.min === "number") {
+    return serverRange
+  }
+
   // Prefer server-driven aggregation ranges when provided
   const anyFilter = filter as unknown as { aggregation?: { type?: string; ranges?: Array<{ from?: number; to?: number }> } }
   const agg = anyFilter.aggregation
@@ -50,8 +56,10 @@ function inferRange(filter: IFilter): NormalizedFilter["range"] {
     return { min, max, step: 1 }
   }
 
-  // Fallbacks for legacy filters without server ranges
+  // Fallbacks for legacy/predefined filters
   const currentYear = new Date().getFullYear()
   if (filter.id.includes("founded_year")) return { min: 1900, max: currentYear, step: 1, unit: "year" }
+  if (filter.id.includes("annual_revenue")) return { min: 0, max: 1000000000, step: 100000, unit: "currency" } // 0 to 1B
+  if (filter.id.includes("employee_count") || filter.id.includes("headcount")) return { min: 0, max: 100000, step: 10 }
   return undefined
 }

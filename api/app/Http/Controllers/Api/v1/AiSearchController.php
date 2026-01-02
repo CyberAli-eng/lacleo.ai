@@ -23,7 +23,7 @@ class AiSearchController extends Controller
     {
         try {
             $request->headers->set('Accept', 'application/json');
-            
+
             // 1. Get the query from the user
             $incomingQuery = (string) ($request->input('query') ?? $request->input('prompt') ?? '');
 
@@ -34,7 +34,7 @@ class AiSearchController extends Controller
 
             // 5. Call the service (Your original method call)
             $result = $this->translator->translate(
-                $messages, 
+                $messages,
                 $request->input('context') ?? []
             );
 
@@ -57,126 +57,11 @@ class AiSearchController extends Controller
             $normalized = $validation['normalized'] ?? $result['filters'];
             $entity = DslValidator::detectEntity($normalized);
 
-            // 8. Build legacy-friendly flat filters for this endpoint
-            $contact = (array) ($normalized['contact'] ?? []);
-            $company = (array) ($normalized['company'] ?? []);
-
-            $flat = [];
-            // Job title
-            if (isset($contact['job_title'])) {
-                $flat['job_title'] = is_array($contact['job_title']) ? $contact['job_title'] : ['include' => [(string) $contact['job_title']]];
-            }
-            // Location object
-            $locationInclude = [
-                'countries' => [],
-                'states' => [],
-                'cities' => [],
-            ];
-            $locationExclude = [
-                'countries' => [],
-                'states' => [],
-                'cities' => [],
-            ];
-
-            $mergeArray = function ($src, $key, &$dest) {
-                if (isset($src[$key]['include']) && is_array($src[$key]['include'])) {
-                    $dest[$key] = array_values(array_unique(array_merge($dest[$key], $src[$key]['include'])));
-                }
-                if (isset($src[$key]['exclude']) && is_array($src[$key]['exclude'])) {
-                    // keep exclude but not used in tests
-                }
-            };
-            foreach (['countries', 'states', 'cities'] as $k) {
-                $mergeArray($contact, $k, $locationInclude);
-                $mergeArray($company, $k, $locationInclude);
-            }
-            if (!empty($locationInclude['countries']) || !empty($locationInclude['states']) || !empty($locationInclude['cities'])) {
-                $flat['location'] = [
-                    'include' => [
-                        'countries' => $locationInclude['countries'],
-                        'states' => $locationInclude['states'],
-                        'cities' => $locationInclude['cities'],
-                    ],
-                ];
-            }
-
-            // Fallback: derive location from raw query if missing
-            if (!isset($flat['location']) && is_string($incomingQuery)) {
-                if (preg_match('/\b(?:in|from|based in|located in)\s+([a-zA-Z][a-zA-Z\s,]+)\b/i', $incomingQuery, $m)) {
-                    $raw = trim($m[1]);
-                    $parts = array_values(array_filter(array_map('trim', preg_split('/[,]|\band\b/i', $raw))));
-                    $countries = [];
-                    $cities = [];
-                    if (count($parts) === 1) {
-                        $countries[] = $parts[0];
-                    } elseif (count($parts) >= 2) {
-                        $countries[] = end($parts);
-                        array_pop($parts);
-                        foreach ($parts as $ci) { $cities[] = $ci; }
-                    }
-                    if (!empty($countries) || !empty($cities)) {
-                        $flat['location'] = [
-                            'include' => [
-                                'countries' => $countries,
-                                'states' => [],
-                                'cities' => $cities,
-                            ],
-                        ];
-                    }
-                }
-            }
-
-            // Ensure location includes tokens from query even if partially present
-            if (is_string($incomingQuery)) {
-                if (preg_match('/\b(?:in|from|based in|located in)\s+([a-zA-Z][a-zA-Z\s,]+)\b/i', $incomingQuery, $m2)) {
-                    $raw2 = trim($m2[1]);
-                    $parts2 = array_values(array_filter(array_map('trim', preg_split('/[,]|\band\b/i', $raw2))));
-                    $countries2 = [];
-                    $cities2 = [];
-                    if (count($parts2) === 1) {
-                        $countries2[] = $parts2[0];
-                    } elseif (count($parts2) >= 2) {
-                        $countries2[] = end($parts2);
-                        array_pop($parts2);
-                        foreach ($parts2 as $ci2) { $cities2[] = $ci2; }
-                    }
-                    if (!isset($flat['location'])) {
-                        $flat['location'] = [ 'include' => [ 'countries' => [], 'states' => [], 'cities' => [] ] ];
-                    }
-                    $flat['location']['include']['countries'] = array_values(array_unique(array_merge($flat['location']['include']['countries'], array_map(fn($c) => ucfirst(strtolower($c)), $countries2))));
-                    $flat['location']['include']['cities'] = array_values(array_unique(array_merge($flat['location']['include']['cities'], array_map(fn($c) => ucfirst(strtolower($c)), $cities2))));
-                }
-            }
-
-            // Company domain
-            if (isset($company['company_domain'])) {
-                $flat['company_domain'] = is_array($company['company_domain']) ? $company['company_domain'] : ['include' => [(string) $company['company_domain']]];
-            }
-
-            // Company names (normalized to company_name)
-            if (isset($company['company_name'])) {
-                $flat['company_name'] = is_array($company['company_name']) ? $company['company_name'] : ['include' => [(string) $company['company_name']]];
-            }
-
-            // Technologies
-            if (isset($company['technologies'])) {
-                $flat['technologies'] = is_array($company['technologies']) ? $company['technologies'] : ['include' => [(string) $company['technologies']]];
-            }
-
-            // Employee count
-            if (isset($company['employee_count'])) {
-                $flat['employee_count'] = is_array($company['employee_count']) ? $company['employee_count'] : ['range' => (array) $company['employee_count']];
-            }
-
-            // Annual revenue
-            if (isset($company['annual_revenue'])) {
-                $flat['annual_revenue'] = is_array($company['annual_revenue']) ? $company['annual_revenue'] : ['range' => (array) $company['annual_revenue']];
-            }
-
-            // 9. Return legacy shape for app compatibility
+            // 8. Return canonical shape directly (Frontend supports it and it prevents data loss)
+            // The frontend checks for 'contact'/'company' keys and uses the canonical DSL if present.
             return response()->json([
                 'entity' => $entity,
-                'filters' => $flat,
+                'filters' => $normalized, // Return full canonical DSL
                 'summary' => $result['summary'] ?? '',
                 'semantic_query' => $result['semantic_query'] ?? null,
                 'custom' => $result['custom'] ?? [],

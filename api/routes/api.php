@@ -21,6 +21,9 @@ Route::options('{any}', function () {
 // Version 1 API routes
 // Public read-only endpoints to ensure frontend visibility during environment setup
 Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::class])->group(function () {
+    Route::get('/health', function () {
+        return response()->json(['status' => 'ok', 'timestamp' => now()->toIso8601String()]);
+    });
     Route::get('/filters', [SearchController::class, 'getFilters']);
     Route::get('/filter/values', [SearchController::class, 'getFilterValues']);
     Route::get('/search/{type}', [SearchController::class, 'search'])->middleware(app()->environment(['testing', 'local']) ? [] : 'throttle:search');
@@ -39,7 +42,6 @@ Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::clas
             app()->environment('testing') ? null : 'throttle:api',
             'limit.request.size',
             'request.timeout',
-            'csrf.guard',
         ]));
 
     Route::get('/company/social', [CompanyController::class, 'social']);
@@ -52,8 +54,10 @@ Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::clas
 Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::class, 'auth:sanctum', 'ensureWorkspace'])->group(function () {
     Route::get('/user', [UserController::class, 'getUser']);
     Route::get('/users/search', [UserController::class, 'search'])->middleware('admin');
-    Route::get('/admin/debug/billing-context', [AdminController::class, 'billingContext'])->middleware('admin');
-    Route::get('/admin/debug/search', [SearchController::class, 'debugQuery'])->middleware('admin');
+    if (app()->environment('local')) {
+        Route::get('/admin/debug/billing-context', [AdminController::class, 'billingContext'])->middleware('admin');
+        Route::get('/admin/debug/search', [SearchController::class, 'debugQuery'])->middleware('admin');
+    }
     Route::middleware('verified')->group(function () {
         // other protected routes
     });

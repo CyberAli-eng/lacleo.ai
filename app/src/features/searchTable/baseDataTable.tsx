@@ -17,14 +17,6 @@ import { selectSearchTableView, setView } from "@/interface/searchTable/view"
 import EditIcon from "../../static/media/icons/edit-icon.svg?react"
 import SparkleIcon from "../../static/media/icons/sparkle-icon.svg?react"
 
-interface ExtendedDataTableProps<T> extends DataTableProps<T> {
-  showCheckbox?: boolean
-  selectedItems?: string[]
-  onItemSelect?: (itemId: string) => void
-  onSelectAll?: (checked: boolean) => void
-  onRowClick?: (row: T) => void
-}
-
 export function DataTable<T>({
   columns,
   data,
@@ -36,16 +28,15 @@ export function DataTable<T>({
   searchPlaceholder = "Search...",
   onSearch,
   searchValue = "",
-  pagination,
-  onPageChange,
   showCheckbox = false,
   selectedItems = [],
   onItemSelect,
   onSelectAll,
   onRowClick,
   onOpenEditColumns,
-  entityType = "contact"
-}: ExtendedDataTableProps<T>) {
+  entityType = "contact",
+  pagination
+}: DataTableProps<T>) {
   const dispatch = useDispatch()
   const isAiPanelCollapsed = useSelector(selectIsAiPanelCollapsed)
   const currentView = useSelector(selectSearchTableView)
@@ -333,16 +324,13 @@ export function DataTable<T>({
         </div>
       )}
 
-      {currentView === "search" && !!pagination && (
-        <Pagination
-          currentPage={pagination.page}
-          lastPage={pagination.lastPage}
-          onPageChange={onPageChange}
-          className={`absolute bottom-0 left-1/2 !mt-2 -translate-x-1/2 bg-transparent transition-opacity duration-200 ${
-            fetching ? "opacity-50" : ""
-          }`}
-        />
+      {/* Pagination */}
+      {currentView === "search" && !!pagination && !fetching && data.length > 0 && (
+        <div className="mt-4">
+          <Pagination currentPage={pagination.currentPage} lastPage={pagination.lastPage} onPageChange={pagination.onPageChange} />
+        </div>
       )}
+
       <SaveFilter open={isSaveModalOpen} onOpenChange={(val) => setIsSaveModalOpen(val)} entityType={entityType} />
     </div>
   )

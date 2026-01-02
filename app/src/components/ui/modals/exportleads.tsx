@@ -4,9 +4,10 @@ import Checkbox from "../checkbox"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../dialog"
 import { Input } from "../input"
 import { useEffect, useMemo, useState } from "react"
-import { useAppDispatch } from "@/app/hooks/reduxHooks"
+import { useAppDispatch, useAppSelector } from "@/app/hooks/reduxHooks"
 import { setCreditUsageOpen } from "@/features/settings/slice/settingSlice"
 import { useExportEstimateMutation, useExportCreateMutation, useBillingUsageQuery } from "@/features/searchTable/slice/apiSlice"
+import { selectSearchMeta } from "@/features/searchExecution/slice/searchExecutionSlice"
 import { useToast } from "../use-toast"
 
 type ExportLeadsProps = {
@@ -58,6 +59,8 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
   const [estimateExport, { isLoading: estimating }] = useExportEstimateMutation()
   const [createExport, { isLoading: exporting }] = useExportCreateMutation()
   const { data: creditData, isLoading: loadingCredits } = useBillingUsageQuery(undefined, { skip: !open })
+  const searchMeta = useAppSelector(selectSearchMeta)
+  const currentDsl = searchMeta.dsl || null
 
   // Calculate total credits from credit data
   const totalCredits = useMemo(() => {
@@ -94,7 +97,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
   const emailsToExport = canShowCounts ? (estimate as { email_count: number }).email_count : 0
   const phonesToExport = canShowCounts ? (estimate as { phone_count: number }).phone_count : 0
   // Debug logging
-  console.log("estimate:", estimate, "canShowCounts:", canShowCounts, "emailsToExport:", emailsToExport, "phonesToExport:", phonesToExport)
+  // Export estimate calculated
   const creditsRequired = canShowCounts ? (estimate as { credits_required: number }).credits_required : undefined
   const availableCredits = canShowCounts ? (estimate as { remaining_before: number }).remaining_before : undefined
   const est = estimate as { credits_required: number; remaining_before: number }
@@ -114,7 +117,7 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
 
     const timer = setTimeout(() => {
       const ids = selectedIds
-      console.log("Export estimate - selectedIds:", ids, "exportMode:", exportMode, "exportCount:", exportCount)
+      // Export estimate - selected IDs
       // If we are in "selected" mode but no IDs, zero out
       if (exportMode === "selected" && (!ids || ids.length === 0)) {
         setEstimate({
@@ -134,10 +137,11 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
 
       const payload = {
         type,
-        ids: exportMode === "selected" ? ids : [], // Only send IDs if in selected mode
+        ids: exportMode === "selected" ? ids : [],
         fields: { email: emailSelected, phone: phoneSelected },
         limit: exportCount,
-        sanitize: !hasSelectedData
+        sanitize: !hasSelectedData,
+        filter_dsl: currentDsl || undefined
       }
 
       // Prevent redundant calls if payload hasn't meaningfully changed?
@@ -163,7 +167,8 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
         sanitize: !hasSelectedData,
         limit: exportCount,
         download: true,
-        requestId: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`
+        requestId: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+        filter_dsl: currentDsl || undefined
       }).unwrap()
       if (res?.url) {
         window.location.href = res.url
@@ -220,9 +225,8 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 className="sr-only"
               />
               <div
-                className={`size-4 rounded-full border-2 transition-all ${
-                  exportMode === "selected" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
-                }`}
+                className={`size-4 rounded-full border-2 transition-all ${exportMode === "selected" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
+                  }`}
               >
                 {exportMode === "selected" && <div className="absolute inset-0 m-[3px] rounded-full bg-white" />}
               </div>
@@ -245,9 +249,8 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                   className="sr-only"
                 />
                 <div
-                  className={`size-4 rounded-full border-2 transition-all ${
-                    exportMode === "custom" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
-                  }`}
+                  className={`size-4 rounded-full border-2 transition-all ${exportMode === "custom" ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"
+                    }`}
                 >
                   {exportMode === "custom" && <div className="absolute inset-0 m-[3px] rounded-full bg-white" />}
                 </div>
@@ -262,9 +265,8 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
                 value={customCount}
                 onChange={(e) => setCustomCount(e.target.value)}
                 disabled={exportMode !== "custom"}
-                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""} ${
-                  isCustomCountTooHigh ? "border-red-500" : ""
-                }`}
+                className={`w-full rounded-lg p-[10px] ${exportMode !== "custom" ? "bg-gray-50 opacity-60" : ""} ${isCustomCountTooHigh ? "border-red-500" : ""
+                  }`}
               />
               <span className=" text-xs font-medium text-gray-600">Out of {totalAvailable}</span>
             </div>
@@ -296,13 +298,9 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
               <div className="py-1.5">
                 <span className="text-xl font-medium text-gray-950">
                   {creditsRequired !== undefined
-                    ? type === "contacts"
-                      ? phonesToExport * 4 + emailsToExport * 1 === 0
-                        ? "Free"
-                        : `${phonesToExport * 4 + emailsToExport * 1} Credits`
-                      : creditsRequired === 0
-                        ? "Free"
-                        : `${creditsRequired} Credits`
+                    ? creditsRequired === 0
+                      ? "Free"
+                      : `${creditsRequired} Credits`
                     : "..."}
                 </span>
               </div>

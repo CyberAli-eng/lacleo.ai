@@ -16,10 +16,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use InvalidArgumentException;
+use App\Http\Traits\ApiErrorResponse;
+use App\Http\Traits\SanitizesPII;
 
 class SearchController extends Controller
 {
+    use ApiErrorResponse, SanitizesPII;
+
     public function __construct(
         protected SearchService $searchService,
         protected SearchQueryValidator $searchQueryValidator,
@@ -32,10 +35,7 @@ class SearchController extends Controller
      */
     public function search(Request $request): JsonResponse
     {
-        Log::debug('Search request received', [
-            'query_string' => $request->getQueryString(),
-            'route_parameters' => $request->route()->parameters(),
-        ]);
+
 
         try {
             $searchParams = $this->prepareSearchParameters($request);
@@ -48,12 +48,8 @@ class SearchController extends Controller
                     return $this->executeSearch($searchParams);
                 })
                 : $this->executeSearch($searchParams);
-            Log::debug('Search executed successfully', [
-                'total_results' => $results['total'] ?? 0,
-                'page' => $searchParams['queryParams']['page'] ?? 1,
-            ]);
-            $debugFlag = $request->query('debug');
-            if ($debugFlag === '1' || $debugFlag === 1 || $debugFlag === true) {
+
+            if (config('app.debug') && ($request->query('debug') === '1' || $request->query('debug') === 'true')) {
                 $built = $this->searchService->buildQueryArray(
                     $searchParams['type'],
                     $searchParams['variables']['searchTerm'] ?? null,
@@ -71,9 +67,8 @@ class SearchController extends Controller
 
             return response()->json($results);
         } catch (Exception $e) {
-            Log::error('Search operation failed', [
+            $this->logSanitized('error', 'Search operation failed', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             return $this->handleSearchException($e);
@@ -85,7 +80,7 @@ class SearchController extends Controller
      */
     public function getFilters(): JsonResponse
     {
-        Log::debug('Retrieving all filters');
+
 
         $filters = $this->filterManager->getActiveFilters()
             ->groupBy('group')
@@ -95,9 +90,7 @@ class SearchController extends Controller
             ->values()
             ->toArray();
 
-        Log::debug('Filters retrieved successfully', [
-            'filter_count' => count($filters),
-        ]);
+
 
         return response()->json(['data' => $filters]);
     }
@@ -107,30 +100,49 @@ class SearchController extends Controller
      */
     public function getFilterValues(Request $request): JsonResponse
     {
-        Log::debug('Filter values request received', [
-            'query_parameters' => $request->query(),
-        ]);
+        if (config('app.debug')) {
+            Log::debug('Filter values request received', [
+                'query_parameters' => $request->query(),
+            ]);
+        }
 
         $validator = $this->validateFilterValuesRequest($request);
 
         if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'details' => $validator->errors()], 422);
+            return $this->validationErrorResponse($validator->errors()->toArray());
         }
 
         $requestQuery = $validator->validated();
+
+        // Extract filter_dsl (active filters) from request
+        $context = [];
+        if ($request->has('filter_dsl')) {
+            $raw = $request->input('filter_dsl');
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $context = $decoded;
+                }
+            } elseif (is_array($raw)) {
+                $context = $raw;
+            }
+        }
 
         try {
             $values = $this->filterManager->getFilterValues(
                 $requestQuery['filter'],
                 $requestQuery['q'] ?? null,
                 $requestQuery['page'] ?? 1,
-                $requestQuery['count'] ?? 10
+                $requestQuery['count'] ?? 10,
+                $context
             );
 
-            Log::debug('Filter values retrieved successfully', [
-                'filter' => $requestQuery['filter'],
-                'count' => count($values['data'] ?? []),
-            ]);
+            if (config('app.debug')) {
+                Log::debug('Filter values retrieved successfully', [
+                    'filter' => $requestQuery['filter'],
+                    'count' => count($values['data'] ?? []),
+                ]);
+            }
 
             return response()->json($values);
         } catch (Exception $e) {
@@ -165,11 +177,13 @@ class SearchController extends Controller
      */
     private function prepareSearchParameters(Request $request): array
     {
-        Log::debug('=== SEARCH REQUEST DEBUG START ===', [
-            'query_string' => $request->getQueryString(),
-            'full_request' => $request->all(),
-            'route_type' => $request->route('type'),
-        ]);
+        if (config('app.debug')) {
+            Log::debug('=== SEARCH REQUEST DEBUG START ===', [
+                'query_string' => $request->getQueryString(),
+                'full_request' => $request->all(),
+                'route_type' => $request->route('type'),
+            ]);
+        }
 
         $searchParams = SearchUrlParser::parseQuery($request->getQueryString());
         $searchParams['type'] = $request->route('type', 'company');
@@ -219,19 +233,13 @@ class SearchController extends Controller
             $searchParams['variables']['searchTerm'] = null;
         }
 
-        Log::debug('Search parameters parsed', [
-            'type' => $searchParams['type'],
-            'has_search_term' => !empty($searchParams['variables']['searchTerm'] ?? null),
-            'search_term_length' => isset($searchParams['variables']['searchTerm']) ? strlen($searchParams['variables']['searchTerm']) : 0,
-            'has_filter_dsl' => !empty($searchParams['variables']['filter_dsl'] ?? []),
-            'filter_dsl_keys' => array_keys($searchParams['variables']['filter_dsl'] ?? []),
-            'page' => $searchParams['queryParams']['page'] ?? null,
-            'count' => $searchParams['queryParams']['count'] ?? null,
-        ]);
+
 
         try {
             $this->searchQueryValidator->validate($searchParams);
-            Log::debug('Validation passed');
+            if (config('app.debug')) {
+                Log::debug('Validation passed');
+            }
         } catch (QueryValidationException $e) {
             Log::error('Validation failed', [
                 'errors' => $e->getErrors(),
@@ -240,7 +248,9 @@ class SearchController extends Controller
             throw $e;
         }
 
-        Log::debug('=== SEARCH REQUEST DEBUG END ===');
+        if (config('app.debug')) {
+            Log::debug('=== SEARCH REQUEST DEBUG END ===');
+        }
 
         return $searchParams;
     }
@@ -250,13 +260,7 @@ class SearchController extends Controller
      */
     private function executeSearch(array $params): array
     {
-        Log::debug('Executing search', [
-            'type' => $params['type'],
-            'search_term' => $params['variables']['searchTerm'] ?? null,
-            'filter_keys' => array_keys($params['variables']['filter_dsl'] ?? []),
-            'page' => $params['queryParams']['page'] ?? 1,
-            'count' => $params['queryParams']['count'] ?? 10,
-        ]);
+
         $page = max(1, min((int) ($params['queryParams']['page'] ?? 1), 100));
         $count = max(1, min((int) ($params['queryParams']['count'] ?? 10), 100));
         $searchTerm = $params['variables']['searchTerm'] ?? null;
@@ -295,13 +299,15 @@ class SearchController extends Controller
                     'id' => $filter->filter_id,
                     'name' => $filter->name,
                     'type' => $filter->value_type,
-                    'input_type' => $filter->input_type,
-                    'is_searchable' => $filter->is_searchable,
+                    'input_type' => $config['input'] ?? $filter->input_type,
+                    'is_searchable' => $config['search']['enabled'] ?? $filter->is_searchable,
                     'allows_exclusion' => $filter->allows_exclusion,
-                    'supports_value_lookup' => $filter->supports_value_lookup,
+                    'supports_value_lookup' => isset($config['preloaded_values']) || ($config['search']['enabled'] ?? false) || $filter->supports_value_lookup,
                     // Server-driven applicability and aggregation
                     'applies_to' => $config['applies_to'] ?? ['company'],
                     'aggregation' => $config['aggregation'] ?? ['enabled' => false],
+                    'range' => $config['range'] ?? null,
+                    'preloaded_values' => $config['preloaded_values'] ?? null,
                     // Maintain UI compatibility for filter_type without heuristics
                     'filter_type' => (function () use ($config) {
                         $applies = $config['applies_to'] ?? [];
@@ -327,6 +333,7 @@ class SearchController extends Controller
             'count' => 'sometimes|nullable|integer|between:1,100',
             'level' => 'nullable|string',
             'parents' => 'array',
+            'filter_dsl' => 'sometimes|nullable',
         ]);
     }
 
@@ -335,37 +342,19 @@ class SearchController extends Controller
      */
     private function handleSearchException(Exception $e): JsonResponse
     {
-        if ($e instanceof \Elastic\Elasticsearch\Exception\ServerResponseException) {
-            return response()->json([
-                'error' => 'ELASTIC_UNAVAILABLE',
-                'message' => 'Search backend is unavailable',
-            ], 503);
+        if ($e instanceof \Elastic\Elasticsearch\Exception\ServerResponseException || stripos($e->getMessage(), 'No alive nodes') !== false) {
+            return $this->errorResponse('Search backend is unavailable', 503, ['code' => 'ELASTIC_UNAVAILABLE']);
         }
-        if (stripos($e->getMessage(), 'No alive nodes') !== false) {
-            return response()->json([
-                'error' => 'ELASTIC_UNAVAILABLE',
-                'message' => 'Search backend is unavailable',
-            ], 503);
-        }
+
         if ($e instanceof QueryValidationException) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'message' => $e->getMessage(),
-                'details' => $e->getErrors(),
-            ], 422);
+            return $this->validationErrorResponse($e->getErrors());
         }
 
         if ($e instanceof InvalidArgumentException) {
-            return response()->json([
-                'error' => config('app.debug') ? $e->getMessage() : null,
-                'message' => 'Invalid Request',
-            ], 400);
+            return $this->errorResponse('Invalid Request', 400, ['detail' => config('app.debug') ? $e->getMessage() : null]);
         }
 
-        return response()->json([
-            'message' => 'An unexpected error occurred',
-            'error' => config('app.debug') ? $e->getMessage() : null,
-        ], 500);
+        return $this->errorResponse('An unexpected error occurred', 500, ['detail' => config('app.debug') ? $e->getMessage() : null]);
     }
 
     /**

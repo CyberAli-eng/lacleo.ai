@@ -143,6 +143,21 @@ class ElasticQueryBuilder
     }
 
     /**
+     * Add a nested query
+     */
+    public function nested(string $path, array $query, string $type = 'must'): self
+    {
+        $this->boolClauses[$type][] = [
+            'nested' => [
+                'path' => $path,
+                'query' => $query,
+            ],
+        ];
+
+        return $this;
+    }
+
+    /**
      * Add a multi-match query
      */
     public function multiMatch(string $query, array $fields, array $options = []): self
@@ -247,6 +262,20 @@ class ElasticQueryBuilder
     }
 
     /**
+     * Set the number of results to return
+     */
+    public function size(int $size): self
+    {
+        if ($this->pagination) {
+            $this->pagination[1] = $size;
+        } else {
+            $this->pagination = [0, $size];
+        }
+
+        return $this;
+    }
+
+    /**
      * Set whether to track total hits
      */
     public function trackTotalHits(bool $track = true): self
@@ -292,6 +321,14 @@ class ElasticQueryBuilder
             $options['index'] = $this->index;
         }
         return $this->model::searchInElastic($this->buildQuery(), $options);
+    }
+
+    /**
+     * Alias for get()
+     */
+    public function search(): ?array
+    {
+        return $this->get();
     }
 
     /**

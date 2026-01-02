@@ -329,7 +329,7 @@ const BuyCreditsButton = () => {
             window.location.href = r.checkout_url
           }
         } catch (err) {
-          console.error(err)
+          // Error purchasing credits
         }
       }}
     >
@@ -352,7 +352,7 @@ const UpgradePlanButton = () => {
             window.location.href = r.url
           }
         } catch (err) {
-          console.error(err)
+          // Error subscribing
         }
       }}
     >

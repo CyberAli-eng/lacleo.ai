@@ -6,7 +6,7 @@ use App\Elasticsearch\ElasticQueryBuilder;
 
 class RangeFilterHandler extends AbstractFilterHandler
 {
-    public function getValues(?string $search = null, int $page = 1, int $perPage = 10): array
+    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
     {
         // Ranges usually don't have listable values unless predefined.
         return $this->emptyPaginatedResponse($page, $perPage);
@@ -25,28 +25,33 @@ class RangeFilterHandler extends AbstractFilterHandler
         }
         $field = $fields[0];
 
+        $range = $values['range'] ?? null;
+
+        // Standard range object {min, max} from FilterManager
+        if (is_array($range)) {
+            $params = [];
+            if (isset($range['min']) && $range['min'] !== null) {
+                $params['gte'] = $range['min'];
+            }
+            if (isset($range['max']) && $range['max'] !== null) {
+                $params['lte'] = $range['max'];
+            }
+
+            if (!empty($params)) {
+                $query->filter(['range' => [$field => $params]]);
+            }
+        }
+
+        // Support for list-based ranges (e.g. from predefined dropdowns)
+        // These might come in via 'include' if logic adapts? 
+        // For now, based on normalized struct, strict ranges are in 'range'.
+        // If predefined ranges passed as strings (e.g. "1-10") via 'include', handle them:
+
+        $included = $values['include'] ?? [];
         $should = [];
 
-        foreach ($values as $valItem) {
-            $val = $valItem['value'];
-            // Handle different range formats
-            // 1. Array with min/max
-            if (is_array($val)) {
-                $range = [];
-                // Check explicitly for null or empty string to allow 0
-                if (isset($val['min']) && $val['min'] !== '' && $val['min'] !== null) {
-                    $range['gte'] = $val['min'];
-                }
-                if (isset($val['max']) && $val['max'] !== '' && $val['max'] !== null) {
-                    $range['lte'] = $val['max'];
-                }
-                
-                if (!empty($range)) {
-                    $should[] = ['range' => [$field => $range]];
-                }
-            } 
-            // 2. String "10-50", "100+", ">100"
-            elseif (is_string($val)) {
+        foreach ($included as $val) {
+            if (is_string($val)) {
                 if (preg_match('/^(\d+)\s*-\s*(\d+)$/', $val, $m)) {
                     $should[] = ['range' => [$field => ['gte' => (int) $m[1], 'lte' => (int) $m[2]]]];
                 } elseif (preg_match('/^(\d+)\+$/', $val, $m) || preg_match('/^>=\s*(\d+)$/', $val, $m)) {

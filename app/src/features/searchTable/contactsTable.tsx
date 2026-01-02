@@ -22,14 +22,13 @@ import { Eye, Mail, Phone, User2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLocation } from "react-router-dom"
 import DownloadIcon from "../../static/media/icons/download-icon.svg?react"
-import { selectSelectedItems, selectActiveFilters, selectSearchContext } from "../filters/slice/filterSlice"
 import { setLastResultCount, selectSemanticQuery, selectShowResults, setShowResults } from "../aisearch/slice/searchslice"
 import { DataTable } from "./baseDataTable"
-import { useSearchContactsQuery, useCompanyLogoQuery } from "./slice/apiSlice"
+import { useCompanyLogoQuery } from "./slice/apiSlice"
 import { CompanyAttributes } from "@/interface/searchTable/search"
 import { openContactInfoForContact } from "./slice/contactInfoSlice"
-import { serializeToDSL } from "@/features/filters/adapter/querySerializer"
 import { useDebounce } from "@/app/hooks/useDebounce"
+import { selectSearchResults, selectSearchStatus, selectSearchMeta, setSort, executeSearch, setPage } from "@/features/searchExecution/slice/searchExecutionSlice"
 
 const ContactCompanyCell = ({ row }: { row: ContactAttributes }) => {
   const normalizedDomain = (row.website || "")
@@ -63,26 +62,7 @@ const PhoneCountCell = ({ contact }: { contact: ContactAttributes }) => {
     phoneCount += 1
   }
 
-  // Fetch company data to check for company phone
-  const normalizedDomain = (contact.website || "")
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .trim()
-  const companySearchUrl = buildSearchUrl({ page: 1, count: 1 }, { searchTerm: normalizedDomain || contact.company || "" })
-  const { data: companySearchData } = useSearchContactsQuery(
-    { type: "company", buildParams: companySearchUrl },
-    { skip: !normalizedDomain && !contact.company }
-  )
-
-  const resolvedCompany: CompanyAttributes | null =
-    ((companySearchData as { data?: Array<{ attributes: CompanyAttributes }> } | undefined)?.data?.[0]?.attributes as
-      | CompanyAttributes
-      | undefined) || null
-
-  const companyPhone = resolvedCompany?.company_phone || resolvedCompany?.phone_number || null
-  if (companyPhone) {
-    phoneCount += 1
-  }
+  // Do not perform extra network calls per row; keep deterministic and cheap
 
   return phoneCount
 }
@@ -94,36 +74,24 @@ export function ContactsTable() {
   const dispatch = useAppDispatch()
   const columnsConfigFromStore = useAppSelector((s) => s.columns.configs.contact)
   useDocumentTitle("Search People")
-  const selectedFilters = useAppSelector(selectSelectedItems)
-  const [pagination, setPagination] = useState({
-    page: 1,
-    count: 50,
-    total: 0,
-    lastPage: 1
-  })
+  // Table consumes executed results only
 
-  // Sync with global search query
   // const globalSearchQuery = useAppSelector(selectSearchQuery)
-  const [queryValue, setQueryValue] = useState("") 
-  const debouncedQueryValue = useDebounce(queryValue, 500)
+  // Removed local query state
+  const queryValue = useAppSelector((state) => state.searchExecution.searchTerm) || ""
 
   const handleSearchChange = (val: string) => {
-    setQueryValue(val)
+    dispatch(setSearchTerm(val))
   }
 
-  const [sortSelected, setSortSelected] = useState<string[]>([])
+  // Removed local sort state
+  const sortSelected = useAppSelector((state) => state.searchExecution.sort)
+  const setSortSelected = (sort: string[]) => dispatch(setSort(sort))
   const [infoContact, setInfoContact] = useState<ContactAttributes | null>(null)
   const [isExportOpen, setIsExportOpen] = useState(false)
 
   // NEW: State for checkbox selection
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
-
-  const handlePageChange = (newPage: number) => {
-    setPagination((prev) => ({
-      ...prev,
-      page: newPage
-    }))
-  }
 
   // NEW: Handle individual contact selection
   const handleContactSelect = useCallback((contactId: string) => {
@@ -133,46 +101,23 @@ export function ContactsTable() {
   // NEW: Handle select all contacts
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allContactIds = data?.data?.map((contact) => contact.id || "") || []
+      const allContactIds = (results as Array<{ id: string; attributes: ContactAttributes }>).map((r) => r.id || "")
       setSelectedContacts(allContactIds.filter((id) => id !== ""))
     } else {
       setSelectedContacts([])
     }
   }
 
-  const activeFilters = useAppSelector(selectActiveFilters)
-  const searchContext = useAppSelector(selectSearchContext)
   const semanticQuery = useAppSelector(selectSemanticQuery)
-  const filterDsl = useMemo(() => serializeToDSL(selectedFilters, activeFilters, searchContext), [selectedFilters, activeFilters, searchContext])
 
-  const queryParams = useMemo(
-    () => ({
-      ...(debouncedQueryValue && debouncedQueryValue.length >= 2 && { searchTerm: debouncedQueryValue }),
-      ...(semanticQuery && { semantic_query: semanticQuery }),
-      ...(filterDsl && { filter_dsl: filterDsl })
-    }),
-    [debouncedQueryValue, semanticQuery, filterDsl]
-  )
+  // Query params are built by the execution engine only when user runs search
 
-  const searchParams = useMemo(
-    () => ({
-      page: pagination.page,
-      count: pagination.count,
-      ...(sortSelected.length && { sort: sortSelected.join(",") })
-    }),
-    [pagination.page, pagination.count, sortSelected]
-  )
-
-  const searchUrl = useMemo(() => buildSearchUrl(searchParams, queryParams), [searchParams, queryParams])
+  // Pagination is controlled by execution engine
 
   const showResults = useAppSelector(selectShowResults)
-  const hasValidSearchTerm = debouncedQueryValue && debouncedQueryValue.length >= 2
-  const dslReady = useMemo(() => Boolean(filterDsl && (filterDsl.company || filterDsl.contact)), [filterDsl])
-
-  const { data, isLoading, isFetching } = useSearchContactsQuery(
-    { type: "contact", buildParams: searchUrl },
-    { refetchOnMountOrArgChange: true, skip: fromAi ? !dslReady : false }
-  )
+  const results = useAppSelector(selectSearchResults)
+  const status = useAppSelector(selectSearchStatus)
+  const searchMeta = useAppSelector(selectSearchMeta)
 
   const sortableFields = ["full_name", "website", "title", "linkedin_url", "company"]
 
@@ -373,29 +318,12 @@ export function ContactsTable() {
     .map((cfg) => (baseColumns || []).find((bc) => (bc?.field as string) === cfg.field))
     .filter((c): c is DataTableColumn<ContactAttributes> => Boolean(c))
 
-  useEffect(() => {
-    if (data?.meta) {
-      setPagination((prev) => ({
-        ...prev,
-        total: data.meta.total || 0,
-        lastPage: data.meta.last_page || 1
-      }))
-      // Update global search state for AI context
-      dispatch(setLastResultCount(data.meta.total || 0))
-    }
-  }, [data?.meta, dispatch])
-
-  // NEW: Clear selection when data changes (page change, search, etc.)
+  // NEW: Clear selection when data changes (search, etc.)
   useEffect(() => {
     setSelectedContacts([])
-  }, [pagination.page, queryValue, filterDsl])
+  }, [results, queryValue])
 
-  useEffect(() => {
-    setPagination((prev) => ({
-      ...prev,
-      page: 1
-    }))
-  }, [filterDsl, debouncedQueryValue])
+  // Do not auto-search on typing; leave execution to explicit actions
 
   return (
     // <Card className="h-full border-gray-200 bg-white backdrop-blur-sm dark:border-gray-800 dark:bg-gray-950">
@@ -419,17 +347,15 @@ export function ContactsTable() {
         <div className="flex-1">
           <DataTable<ContactAttributes>
             columns={visibleOrderedContactColumns}
-            data={(data as SearchApiResponse<ContactAttributes>)?.data || []}
-            loading={isLoading}
-            fetching={isFetching}
+            data={results as Array<{ id: string; attributes: ContactAttributes; highlights: Record<string, string[]> | null }>}
+            loading={status === "loading"}
+            fetching={status === "loading"}
             sortableFields={sortableFields}
             onSort={setSortSelected}
             sortSelected={sortSelected}
             searchPlaceholder="Search contacts..."
             onSearch={handleSearchChange}
             searchValue={queryValue}
-            pagination={pagination}
-            onPageChange={handlePageChange}
             showCheckbox={true}
             selectedItems={selectedContacts}
             onItemSelect={handleContactSelect}
@@ -439,10 +365,19 @@ export function ContactsTable() {
               dispatch(openContactInfoForContact(row as ContactAttributes))
             }}
             entityType="contact"
+            pagination={{
+              currentPage: useAppSelector((state) => state.searchExecution.page) || 1,
+              lastPage: Math.ceil(
+                (useAppSelector((state) => state.searchExecution.total) || 0) / (useAppSelector((state) => state.searchExecution.count) || 50)
+              ),
+              onPageChange: (page) => {
+                dispatch(setPage(page))
+                dispatch(executeSearch())
+              }
+            }}
           />
         </div>
       </div>
-
       <Dialog open={!!infoContact} onOpenChange={(open) => !open && setInfoContact(null)}>
         <DialogPortal>
           <DialogOverlay />
@@ -457,7 +392,7 @@ export function ContactsTable() {
         open={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         selectedCount={selectedContacts.length}
-        totalAvailable={pagination.total}
+        totalAvailable={searchMeta.total || 0}
         selectedIds={selectedContacts}
         type="contacts"
       />

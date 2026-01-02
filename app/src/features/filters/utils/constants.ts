@@ -7,6 +7,9 @@ export const FILTER_KEYS = {
   CONTACT_CITY: "city",
   CONTACT_STATE: "state",
   CONTACT_COUNTRY: "country",
+  FIRST_NAME: "first_name",
+  LAST_NAME: "last_name",
+  FULL_NAME: "full_name",
 
   // Company Filters
   COMPANY_NAME: "company_names",
@@ -26,6 +29,9 @@ export const FILTER_LABELS: Record<string, string> = {
   [FILTER_KEYS.DEPARTMENTS]: "Department",
   [FILTER_KEYS.SENIORITY]: "Seniority",
   [FILTER_KEYS.CONTACT_LOCATION]: "Location",
+  [FILTER_KEYS.FIRST_NAME]: "First Name",
+  [FILTER_KEYS.LAST_NAME]: "Last Name",
+  [FILTER_KEYS.FULL_NAME]: "Full Name",
   [FILTER_KEYS.COMPANY_NAME]: "Company",
   [FILTER_KEYS.EMPLOYEE_COUNT]: "Company Size",
   [FILTER_KEYS.REVENUE]: "Revenue",

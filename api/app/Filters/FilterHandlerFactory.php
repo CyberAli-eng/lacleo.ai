@@ -8,18 +8,21 @@ use InvalidArgumentException;
 
 class FilterHandlerFactory
 {
-    public function make(Filter $filter): FilterHandlerInterface
+    public function make(Filter $filter, ?FilterManager $manager = null): FilterHandlerInterface
     {
         // Use 'type' from registry
         $type = $filter->type ?? null;
-        
+
+        $mode = $filter->settings['filtering']['mode'] ?? null;
+        if ($mode === 'exists') {
+            return new \App\Filters\Handlers\ElasticsearchFilterHandler($filter, $manager);
+        }
         return match ($type) {
-            'text' => new \App\Filters\Handlers\TextFilterHandler($filter),
-            'keyword' => new \App\Filters\Handlers\FacetFilterHandler($filter),
-            'range', 'date' => new \App\Filters\Handlers\RangeFilterHandler($filter),
-            'boolean' => new \App\Filters\Handlers\BooleanFilterHandler($filter),
-            'direct' => new \App\Filters\Handlers\DirectFilterHandler($filter),
-            default => new \App\Filters\Handlers\ElasticsearchFilterHandler($filter)
+            'text', 'keyword' => new \App\Filters\Handlers\TextFilterHandler($filter, $manager),
+            'range', 'date' => new \App\Filters\Handlers\RangeFilterHandler($filter, $manager),
+            'boolean' => new \App\Filters\Handlers\BooleanFilterHandler($filter, $manager),
+            'direct' => new \App\Filters\Handlers\DirectFilterHandler($filter, $manager),
+            default => new \App\Filters\Handlers\ElasticsearchFilterHandler($filter, $manager)
         };
     }
 }

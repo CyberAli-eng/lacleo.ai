@@ -13,22 +13,62 @@ class AiQueryTranslatorService
      * Job title keywords for deterministic detection
      */
     private const JOB_TITLE_KEYWORDS = [
-        'engineer', 'developer', 'programmer', 'architect', 'analyst',
-        'manager', 'director', 'chief', 'officer', 'vp', 'vice president',
-        'cto', 'ceo', 'cfo', 'coo', 'head of', 'lead',
-        'specialist', 'consultant', 'coordinator', 'associate',
-        'designer', 'scientist', 'researcher', 'technician',
-        'administrator', 'representative', 'agent', 'advisor',
-        'people', 'person', 'professional', 'staff', 'employee', 'team member',
+        'engineer',
+        'developer',
+        'programmer',
+        'architect',
+        'analyst',
+        'manager',
+        'director',
+        'chief',
+        'officer',
+        'vp',
+        'vice president',
+        'cto',
+        'ceo',
+        'cfo',
+        'coo',
+        'head of',
+        'lead',
+        'specialist',
+        'consultant',
+        'coordinator',
+        'associate',
+        'designer',
+        'scientist',
+        'researcher',
+        'technician',
+        'administrator',
+        'representative',
+        'agent',
+        'advisor',
+        'people',
+        'person',
+        'professional',
+        'staff',
+        'employee',
+        'team member',
     ];
 
     /**
      * Company metric keywords for deterministic detection
      */
     private const COMPANY_KEYWORDS = [
-        'company', 'companies', 'organization', 'business', 'firm',
-        'startup', 'enterprise', 'corporation', 'industry', 'sector',
-        'revenue', 'employees', 'headcount', 'founded', 'established',
+        'company',
+        'companies',
+        'organization',
+        'business',
+        'firm',
+        'startup',
+        'enterprise',
+        'corporation',
+        'industry',
+        'sector',
+        'revenue',
+        'employees',
+        'headcount',
+        'founded',
+        'established',
     ];
 
     /**
@@ -51,11 +91,11 @@ class AiQueryTranslatorService
 
         // STEP 1: Deterministic pre-analysis
         $preAnalysis = $this->analyzeQueryDeterministically($query);
-        
+
         // STEP 2: Try AI translation with timeout
         $baseUrl = config('services.ollama.base_url');
         $model = config('services.ollama.chat_model');
-        
+
         if (!$baseUrl || !$model) {
             Log::warning('AI service not configured, using rule-based fallback');
             return $this->buildRuleBasedResponse($query, $preAnalysis);
@@ -86,18 +126,18 @@ class AiQueryTranslatorService
     private function analyzeQueryDeterministically(string $query): array
     {
         $queryLower = strtolower($query);
-        
+
         // Detect job titles (more specific patterns first)
         $jobTitles = [];
         $hasJobTitleKeyword = false;
-        
+
         foreach (self::JOB_TITLE_KEYWORDS as $keyword) {
             if (stripos($queryLower, $keyword) !== false) {
                 $hasJobTitleKeyword = true;
                 $jobTitles[] = $keyword;
             }
         }
-        
+
         // Detect company names (look for "at X" patterns)
         $companyNames = [];
         if (preg_match('/\b(?:at|for|with|from)\s+([\w\s&.-]+?)(?:\s+(?:who|that|with|in|and|or|based|located)|[\.,;:]|$)/i', $query, $matches)) {
@@ -110,7 +150,7 @@ class AiQueryTranslatorService
                 $companyDomains[] = strtolower(trim($d));
             }
         }
-        
+
         // Detect company metrics keywords
         $hasCompanyMetrics = false;
         foreach (self::COMPANY_KEYWORDS as $keyword) {
@@ -119,7 +159,7 @@ class AiQueryTranslatorService
                 break;
             }
         }
-        
+
         // Detect location (cities, states, countries)
         $locations = [
             'countries' => [],
@@ -140,18 +180,38 @@ class AiQueryTranslatorService
                 }
             }
         }
-        
+
+        // Detect potential names (Two capitalized words)
+        $potentialNames = [];
+        if (preg_match_all('/\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/', $query, $nmatches)) {
+            for ($i = 0; $i < count($nmatches[0]); $i++) {
+                $n = $nmatches[0][$i];
+                // Exclude if it's a known job title or company
+                $isJob = false;
+                foreach (self::JOB_TITLE_KEYWORDS as $jk) {
+                    if (stripos($n, $jk) !== false) {
+                        $isJob = true;
+                        break;
+                    }
+                }
+                if (!$isJob) {
+                    $potentialNames[] = $n;
+                }
+            }
+        }
+
         // Deterministic entity detection
-        // Rule: If job title keywords exist → contacts
+        // Rule: If job title keywords exist or names detected → contacts
         //       Else if company metrics exist → companies  
         //       Else → contacts (default)
-        $entity = $hasJobTitleKeyword ? 'contacts' : ($hasCompanyMetrics ? 'companies' : 'contacts');
-        
+        $entity = ($hasJobTitleKeyword || !empty($potentialNames)) ? 'contacts' : ($hasCompanyMetrics ? 'companies' : 'contacts');
+
         return [
             'entity' => $entity,
             'job_titles' => $jobTitles,
             'company_names' => $companyNames,
             'company_domains' => $companyDomains,
+            'potential_names' => $potentialNames,
             'has_job_title_keyword' => $hasJobTitleKeyword,
             'has_company_metrics' => $hasCompanyMetrics,
             'locations' => $locations,
@@ -180,42 +240,54 @@ class AiQueryTranslatorService
             ->implode("\n");
 
         $systemPrompt = <<<EOT
-You are a lead generation assistant. Convert the user's request into a JSON filter object.
-You must ALWAYS output strict JSON. Never output text outside JSON.
-Do not infer facts. Only translate the user's instructions into filters.
+You are a precise JSON generator for a B2B search engine.
+Your goal is to extract search filters from the user's query.
 
-{$contextPreamble}
-
-ONLY use the following Filter IDs:
+INSTRUCTIONS:
+1. Output ONLY a valid JSON object. No explanation.
+2. Structure: { "entity": "contacts"|"companies", "filters": { "contact": {}, "company": {} }, "summary": "string" }
+3. Map user intent to these exact Filter IDs:
 {$availableFilterList}
 
-CRITICAL RULES (NON-NEGOTIABLE):
-1. Job titles (engineer, manager, CEO, etc.) MUST go under "contact" key ONLY
-2. Company attributes (company names, industries, revenue, etc.) MUST go under "company" key ONLY
-3. NEVER put job_title under the "company" key
-4. When multiple job titles exist, keep the longest/most specific one
-5. "AI Engineers at Microsoft" means:
-   - contact.job_title = ["AI Engineer"]
-   - company.company_names = ["Microsoft"]
+RULES:
+- "contacts" entity implies looking for people (CEO, Engineer, Founder).
+- "companies" entity implies looking for organizations.
+- If looking for people at specific companies: "entity": "contacts", "filters": { "company": { "company_names": { "include": ["Microsoft"] } } }
+- Job titles -> values list: ["Software Engineer"]. Always use "include".
+- Locations -> "contact_country" or "company_country" depending on entity context. Default to "contact".
+- Revenue/Headcount -> use 'range': { 'min': 1000, 'max': 5000 }.
 
-Entity Detection:
-- If job title terms are present → set "entity" to "contacts"
-- Else if company metrics are present → set "entity" to "companies"
-- Else default to "contacts"
-
-Output Format (Canonical DSL):
+EXAMPLE 1:
+User: "Find CTOs in London"
+JSON:
 {
-  "entity": "contacts" | "companies",
+  "entity": "contacts",
   "filters": {
-    "contact": { "job_title": { "include": ["CEO"] } },
-    "company": { "company_names": { "include": ["London"] } }
+    "contact": {
+      "job_title": { "include": ["CTO"] },
+      "contact_city": { "include": ["London"] }
+    },
+    "company": {}
   },
-  "summary": "Searching for CEOs at companies in London",
-  "semantic_query": null,
-  "custom": []
+  "summary": "Searching for CTOs based in London"
 }
 
-Return ONLY valid JSON in this exact format.
+EXAMPLE 2:
+User: "SaaS companies with 50+ employees"
+JSON:
+{
+  "entity": "companies",
+  "filters": {
+    "contact": {},
+    "company": {
+      "business_category": { "include": ["SaaS"] },
+      "employee_count": { "range": { "min": 50 } }
+    }
+  },
+  "summary": "Searching for SaaS companies with over 50 employees"
+}
+
+GENERATE JSON NOW:
 EOT;
 
         // Build the messages array for Ollama
@@ -236,7 +308,7 @@ EOT;
         if ($timeout <= 0) {
             $timeout = 30;
         }
-        
+
         $response = Http::timeout($timeout)
             ->connectTimeout(min(10, $timeout))
             ->post(rtrim((string) $baseUrl, '/') . '/api/chat', [
@@ -311,14 +383,14 @@ EOT;
 
         // CRITICAL: Validate DSL and auto-correct misplaced filters
         $validation = DslValidator::validate($result['filters']);
-        
+
         if (!$validation['valid']) {
             Log::warning('AI produced invalid DSL, auto-correcting', [
                 'errors' => $validation['errors'],
                 'original' => $result['filters'],
                 'corrected' => $validation['normalized'],
             ]);
-            
+
             $result['filters'] = $validation['normalized'];
         } else {
             $result['filters'] = $validation['normalized'];
@@ -329,7 +401,7 @@ EOT;
 
         // CRITICAL: Override entity detection with deterministic logic
         $result['entity'] = DslValidator::detectEntity($result['filters']);
-        
+
         // If pre-analysis detected job titles but AI didn't, inject them
         if ($preAnalysis['has_job_title_keyword'] && empty($result['filters']['contact']['job_title'])) {
             if (!empty($preAnalysis['job_titles'])) {
@@ -349,19 +421,24 @@ EOT;
             Log::info('Injected company domains from deterministic analysis', ['domains' => $preAnalysis['company_domains']]);
         }
 
+        // If pre-analysis detected potential names but AI didn't, inject as full_name
+        if (!empty($preAnalysis['potential_names']) && empty($result['filters']['contact']['full_name']) && empty($result['filters']['contact']['first_name'])) {
+            $result['filters']['contact']['full_name'] = ['include' => $preAnalysis['potential_names']];
+        }
+
         // If pre-analysis detected locations but AI didn't, inject into contact bucket
         $loc = $preAnalysis['locations'] ?? ['countries' => [], 'states' => [], 'cities' => []];
         $hasAnyLoc = (is_array($loc['countries']) && count($loc['countries']) > 0) || (is_array($loc['states']) && count($loc['states']) > 0) || (is_array($loc['cities']) && count($loc['cities']) > 0);
         if ($hasAnyLoc) {
             // Prefer contact-level location for mixed queries
             if (empty($result['filters']['contact']['countries']) && !empty($loc['countries'])) {
-                $result['filters']['contact']['countries'] = ['include' => array_map(fn($c) => Str::title((string) $c), array_values(array_unique($loc['countries'])) )];
+                $result['filters']['contact']['countries'] = ['include' => array_map(fn($c) => Str::title((string) $c), array_values(array_unique($loc['countries'])))];
             }
             if (empty($result['filters']['contact']['states']) && !empty($loc['states'])) {
-                $result['filters']['contact']['states'] = ['include' => array_map(fn($s) => Str::title((string) $s), array_values(array_unique($loc['states'])) )];
+                $result['filters']['contact']['states'] = ['include' => array_map(fn($s) => Str::title((string) $s), array_values(array_unique($loc['states'])))];
             }
             if (empty($result['filters']['contact']['cities']) && !empty($loc['cities'])) {
-                $result['filters']['contact']['cities'] = ['include' => array_map(fn($ci) => Str::title((string) $ci), array_values(array_unique($loc['cities'])) )];
+                $result['filters']['contact']['cities'] = ['include' => array_map(fn($ci) => Str::title((string) $ci), array_values(array_unique($loc['cities'])))];
             }
         }
 
@@ -396,7 +473,7 @@ EOT;
         }
 
         $jobTitleFilter = $filters['contact']['job_title'];
-        
+
         // Handle different structures
         if (isset($jobTitleFilter['include']) && is_array($jobTitleFilter['include'])) {
             $titles = $jobTitleFilter['include'];
@@ -409,7 +486,7 @@ EOT;
         if (count($titles) > 1) {
             $bestTitle = $this->selectLongestJobTitle($titles);
             $filters['contact']['job_title'] = ['include' => [$bestTitle]];
-            
+
             Log::info('Normalized multiple job titles to longest', [
                 'original_titles' => $titles,
                 'selected_title' => $bestTitle,
@@ -429,7 +506,7 @@ EOT;
         }
 
         // Sort by length descending
-        usort($titles, function($a, $b) {
+        usort($titles, function ($a, $b) {
             return strlen($b) - strlen($a);
         });
 
@@ -448,11 +525,15 @@ EOT;
             $num = (float) $numStr;
             $unit = strtolower($m[2] ?? '');
             $mult = 1;
-            if ($unit === 'k' || $unit === 'thousand') $mult = 1_000;
-            elseif ($unit === 'm' || $unit === 'million') $mult = 1_000_000;
-            elseif ($unit === 'b' || $unit === 'billion') $mult = 1_000_000_000;
+            if ($unit === 'k' || $unit === 'thousand')
+                $mult = 1_000;
+            elseif ($unit === 'm' || $unit === 'million')
+                $mult = 1_000_000;
+            elseif ($unit === 'b' || $unit === 'billion')
+                $mult = 1_000_000_000;
             $val = (int) round($num * $mult);
-            if ($val > 0) return $val;
+            if ($val > 0)
+                return $val;
         }
         return null;
     }
@@ -508,9 +589,12 @@ EOT;
         $loc = $preAnalysis['locations'] ?? ['countries' => [], 'states' => [], 'cities' => []];
         $hasAnyLoc = (is_array($loc['countries']) && count($loc['countries']) > 0) || (is_array($loc['states']) && count($loc['states']) > 0) || (is_array($loc['cities']) && count($loc['cities']) > 0);
         if ($hasAnyLoc) {
-            if (!empty($loc['countries'])) $filters['contact']['countries'] = ['include' => array_map(fn($c) => \Illuminate\Support\Str::title((string) $c), array_values(array_unique($loc['countries'])) )];
-            if (!empty($loc['states'])) $filters['contact']['states'] = ['include' => array_map(fn($s) => \Illuminate\Support\Str::title((string) $s), array_values(array_unique($loc['states'])) )];
-            if (!empty($loc['cities'])) $filters['contact']['cities'] = ['include' => array_map(fn($ci) => \Illuminate\Support\Str::title((string) $ci), array_values(array_unique($loc['cities'])) )];
+            if (!empty($loc['countries']))
+                $filters['contact']['countries'] = ['include' => array_map(fn($c) => \Illuminate\Support\Str::title((string) $c), array_values(array_unique($loc['countries'])))];
+            if (!empty($loc['states']))
+                $filters['contact']['states'] = ['include' => array_map(fn($s) => \Illuminate\Support\Str::title((string) $s), array_values(array_unique($loc['states'])))];
+            if (!empty($loc['cities']))
+                $filters['contact']['cities'] = ['include' => array_map(fn($ci) => \Illuminate\Support\Str::title((string) $ci), array_values(array_unique($loc['cities'])))];
         }
 
         // If no specific filters detected, use keywords under companies

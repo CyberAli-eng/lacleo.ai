@@ -31,8 +31,16 @@ export interface DataTableProps<T> {
   searchPlaceholder?: string
   onSearch?: (value: string) => void
   searchValue?: string
-  pagination?: PaginationState
-  onPageChange: (page: number) => void
   onOpenEditColumns?: () => void
   entityType?: "contact" | "company"
+  showCheckbox?: boolean
+  selectedItems?: string[]
+  onItemSelect?: (itemId: string) => void
+  onSelectAll?: (checked: boolean) => void
+  onRowClick?: (row: T) => void
+  pagination?: {
+    currentPage: number
+    lastPage: number
+    onPageChange: (page: number) => void
+  }
 }

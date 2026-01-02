@@ -127,12 +127,19 @@ const contactsApi = enhancedApi.injectEndpoints({
           remaining_before: number
           remaining_after: number
         },
-        { type?: "contacts" | "companies"; ids: string[]; fields: { email: boolean; phone: boolean }; limit?: number; sanitize?: boolean }
+        {
+          type?: "contacts" | "companies"
+          ids: string[]
+          fields: { email: boolean; phone: boolean }
+          limit?: number
+          sanitize?: boolean
+          filter_dsl?: Record<string, unknown>
+        }
       >({
-        query: ({ type = "contacts", ids, fields, limit, sanitize }) => ({
+        query: ({ type = "contacts", ids, fields, limit, sanitize, filter_dsl }) => ({
           url: "/billing/preview-export",
           method: "POST",
-          body: { type, ids, fields, limit, sanitize }
+          body: { type, ids, fields, limit, sanitize, filter_dsl }
         })
       }),
       exportCreate: builder.mutation<
@@ -145,14 +152,15 @@ const contactsApi = enhancedApi.injectEndpoints({
           requestId?: string
           sanitize?: boolean
           download?: boolean
+          filter_dsl?: Record<string, unknown>
         }
       >({
-        query: ({ type, ids, fields, limit, requestId, sanitize, download }) => {
+        query: ({ type, ids, fields, limit, requestId, sanitize, download, filter_dsl }) => {
           const rId = requestId ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`)
           return {
             url: "/billing/export",
             method: "POST",
-            body: { type, ids, fields, limit, sanitize, download, requestId: rId },
+            body: { type, ids, fields, limit, sanitize, download, requestId: rId, filter_dsl: filter_dsl },
             headers: { "X-Request-Id": rId }
           }
         },

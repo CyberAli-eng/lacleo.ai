@@ -17,14 +17,20 @@ class DslValidator
      * Contact-only filter keys
      */
     private const CONTACT_ONLY_FILTERS = [
+        'first_name',
+        'last_name',
+        'full_name',
         'job_title',
         'title',
         'departments',
         'department',
         'seniority',
-        'experience_years',
-        'years_of_experience',
-        'years_experience',
+        'email',
+        'work_email',
+        'personal_email',
+        'phone_number',
+        'mobile_number',
+        'direct_number',
     ];
 
     /**
@@ -34,6 +40,8 @@ class DslValidator
         'company_names',
         'company',
         'company_name',
+        'company_domain',
+        'website',
         'industries',
         'industry',
         'technologies',
@@ -97,7 +105,7 @@ class DslValidator
                     continue;
                 }
                 $applies = (array) ($reg['applies_to'] ?? []);
-                
+
                 // Check if this is a company-only filter in contact bucket
                 if (in_array($normalizedKey, self::COMPANY_ONLY_FILTERS) || (!in_array('contact', $applies) && in_array('company', $applies))) {
                     $errors[] = "Filter '{$key}' belongs in company bucket, not contact bucket";
@@ -107,7 +115,7 @@ class DslValidator
                     }
                     continue;
                 }
-                
+
                 $normalized['contact'][$normalizedKey] = $value;
             }
         }
@@ -124,7 +132,7 @@ class DslValidator
                     continue;
                 }
                 $applies = (array) ($reg['applies_to'] ?? []);
-                
+
                 // CRITICAL: Job titles must NEVER be in company bucket
                 if (in_array($normalizedKey, self::CONTACT_ONLY_FILTERS) || (!in_array('company', $applies) && in_array('contact', $applies))) {
                     $errors[] = "Filter '{$key}' belongs in contact bucket, not company bucket (CRITICAL: job titles must be contact-level)";
@@ -134,7 +142,7 @@ class DslValidator
                     }
                     continue;
                 }
-                
+
                 $normalized['company'][$normalizedKey] = $value;
             }
         }
@@ -198,7 +206,7 @@ class DslValidator
     private static function normalizeFilterKey(string $key): string
     {
         $key = strtolower(trim($key));
-        
+
         // Normalize common variations
         $map = [
             'title' => 'job_title',
@@ -245,7 +253,7 @@ class DslValidator
 
         // Expected structure: { include?: [], exclude?: [], range?: {min, max}, presence?: string }
         $allowedKeys = ['include', 'exclude', 'range', 'presence', 'operator'];
-        
+
         foreach (array_keys($value) as $k) {
             if (!in_array($k, $allowedKeys)) {
                 $errors[] = "Unknown key '{$k}' in {$bucket}.{$key} filter";

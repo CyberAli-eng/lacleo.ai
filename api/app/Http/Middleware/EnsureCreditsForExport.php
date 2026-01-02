@@ -176,21 +176,30 @@ class EnsureCreditsForExport
             $phoneCount = 0;
             foreach ($data as $c) {
                 $normalized = \App\Services\RecordNormalizer::normalizeContact($c);
+                // Count 1 credit per contact with at least one work email
                 if (!empty($normalized['emails'])) {
-                    $emailCount += count($normalized['emails']);
+                    foreach ($normalized['emails'] as $e) {
+                        if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
+                            $emailCount++;
+                            break; // Only count once per contact
+                        }
+                    }
                 }
-                if (!empty($normalized['phones'])) {
+                // Count 4 credits per contact: mobile phone (priority 1), or direct phone if no mobile (priority 2)
+                if (!empty($normalized['mobile_number'])) {
+                    $phoneCount++;
+                } elseif (!empty($normalized['direct_number'])) {
                     $phoneCount++;
                 }
             }
             return [$contactsIncluded, $emailCount, $phoneCount];
         }
-        
+
         // For companies: decode IDs, fetch companies directly, no cross-checking, no credits
         $decodedIds = array_map(function ($id) {
             return urldecode(str_replace('+', ' ', $id));
         }, $ids);
-        
+
         $companies = array_map(function ($id) {
             try {
                 return Company::findInElastic($id);
@@ -237,10 +246,19 @@ class EnsureCreditsForExport
             while (true) {
                 foreach (($result['data'] ?? []) as $c) {
                     $norm = \App\Services\RecordNormalizer::normalizeContact($c);
+                    // Count 1 credit per contact with at least one work email
                     if (!empty($norm['emails'])) {
-                        $emailCount += count($norm['emails']);
+                        foreach ($norm['emails'] as $e) {
+                            if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
+                                $emailCount++;
+                                break; // Only count once per contact
+                            }
+                        }
                     }
-                    if (!empty($norm['phones'])) {
+                    // Count 4 credits per contact: mobile phone (priority 1), or direct phone if no mobile (priority 2)
+                    if (!empty($norm['mobile_number'])) {
+                        $phoneCount++;
+                    } elseif (!empty($norm['direct_number'])) {
                         $phoneCount++;
                     }
                 }
@@ -255,16 +273,16 @@ class EnsureCreditsForExport
 
         // For companies: don't cross-check contacts, don't charge any credits
         // Just return counts for metadata - all credits are 0
-        
+
         // If no IDs provided, return 0 counts (bulk export will be handled by controller)
         if (empty($ids)) {
             return [0, 0, 0, 0];
         }
-        
+
         $decodedIds = array_map(function ($id) {
             return urldecode(str_replace('+', ' ', $id));
         }, $ids);
-        
+
         $companies = array_map(function ($id) {
             try {
                 return Company::findInElastic($id);

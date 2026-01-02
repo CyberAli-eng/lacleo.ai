@@ -19,8 +19,8 @@ export const RangeSlider = ({
   step = 1,
   value = [0, 5],
   onChange,
-  unit = "YOE",
-  label = "Years of Experience",
+  unit = "",
+  label = "",
   hideHeader = false
 }: RangeSliderProps) => {
   const [range, setRange] = useState<[number, number]>(value)

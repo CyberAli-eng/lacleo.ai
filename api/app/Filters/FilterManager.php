@@ -23,14 +23,15 @@ class FilterManager
 
     public function __construct(
         protected FilterHandlerFactory $factory
-    ) {}
+    ) {
+    }
 
     /**
      * Get handler for a specific filter
      */
     public function getHandler(Filter $filter): FilterHandlerInterface
     {
-        return $this->factory->make($filter);
+        return $this->factory->make($filter, $this);
     }
 
     /**
@@ -58,11 +59,13 @@ class FilterManager
                     'fields' => $config['fields'],
                     'search_fields' => $config['search']['suggest_fields'] ?? [],
                     'target_model' => in_array('company', $config['applies_to']) ? \App\Models\Company::class : (in_array('contact', $config['applies_to']) ? \App\Models\Contact::class : \App\Models\Company::class),
+                    'filtering' => $config['filtering'] ?? ['mode' => 'terms', 'supports_exclusion' => false],
                 ],
                 'sort_order' => $config['sort_order'],
                 'is_active' => $config['active'],
                 'supports_value_lookup' => in_array($config['data_source'], ['elasticsearch', 'predefined']),
                 'filter_type' => $config['type'],
+                'range' => $config['range'] ?? null,
             ];
 
             $filter = new Filter($attributes);
@@ -90,7 +93,7 @@ class FilterManager
 
         foreach ($orderedFilters as $filterId => $value) {
             $filterModel = $this->getFilter($filterId);
-            if (! $filterModel) {
+            if (!$filterModel) {
                 \Log::warning('FilterManager: Unknown filter ID ignored', ['filter_id' => $filterId]);
                 continue;
             }
@@ -98,7 +101,7 @@ class FilterManager
             $normalized = $this->normalizeFilterValue($value);
 
             // Enforce exclusion support
-            if (!empty($normalized['exclude'] ?? []) && ! ($filterModel->allows_exclusion ?? false)) {
+            if (!empty($normalized['exclude'] ?? []) && !($filterModel->allows_exclusion ?? false)) {
                 \Log::warning('FilterManager: Exclusions not supported for filter, removing', ['filter_id' => $filterId]);
                 $normalized['exclude'] = [];
             }
@@ -126,7 +129,7 @@ class FilterManager
         usort($sortedKeys, function ($a, $b) use ($priorityMap) {
             $filterA = $this->getFilter($a);
             $filterB = $this->getFilter($b);
-            
+
             $typeA = $filterA->type ?? 'text';
             $typeB = $filterB->type ?? 'text';
 
@@ -188,18 +191,71 @@ class FilterManager
     /**
      * Get values for a specific filter
      */
-    public function getFilterValues(string $filterId, ?string $search = null, int $page = 1, int $perPage = 10): array
+    public function getFilterValues(string $filterId, ?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
     {
-        $filter = $this->getFilter($filterId);
-        if (! $filter) {
-            throw new ModelNotFoundException("Filter not found: {$filterId}");
+        // Alias common mismatched IDs
+        $aliases = [
+            'company_technologies' => 'technologies',
+            'contact_technologies' => 'technologies',
+            'tech' => 'technologies',
+            'company_location' => 'company_country',
+            'contact_location' => 'contact_country',
+        ];
+        $actualId = $aliases[$filterId] ?? $filterId;
+
+        $filter = $this->getFilter($actualId);
+        if (!$filter) {
+            $filter = $this->getFilter($filterId);
+            if (!$filter) {
+                throw new ModelNotFoundException("Filter not found: {$filterId} (aliased to {$actualId})");
+            }
+        }
+
+        // Get filter config from registry
+        $configs = \App\Services\FilterRegistry::getFilters();
+        $filterConfig = collect($configs)->firstWhere('id', $filter->filter_id);
+
+        // If no search query and filter has preloaded values, return them
+        if (!$search && isset($filterConfig['preloaded_values']) && !empty($filterConfig['preloaded_values'])) {
+            // Get aggregation counts if enabled
+            $counts = [];
+            if (isset($filterConfig['aggregation']['enabled']) && $filterConfig['aggregation']['enabled']) {
+                try {
+                    $counts = $this->getAggregationCounts($filter, $filterConfig, $context);
+                } catch (\Throwable $e) {
+                    \Log::warning('Failed to get aggregation counts for filter', [
+                        'filter_id' => $filter->filter_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Merge preloaded values with counts
+            $preloadedData = collect($filterConfig['preloaded_values'])->map(function ($item) use ($counts) {
+                return [
+                    'id' => $item['id'],
+                    'name' => $item['name'],
+                    'count' => $counts[$item['id']] ?? $item['count'] ?? null,
+                ];
+            })->values()->toArray();
+
+            return [
+                'data' => $preloadedData,
+                'meta' => [
+                    'current_page' => 1,
+                    'per_page' => count($preloadedData),
+                    'total' => count($preloadedData),
+                    'has_more' => false,
+                    'preloaded' => true,
+                ],
+            ];
         }
 
         $handler = $this->getHandler($filter);
 
-        // Don't cache if searching
-        if ($search) {
-            return $handler->getValues($search, $page, $perPage);
+        // Don't cache if searching or if context (active filters) is provided
+        if ($search || !empty($context)) {
+            return $handler->getValues($search, $page, $perPage, $context);
         }
 
         // Get cache key and TTL based on filter type
@@ -210,6 +266,93 @@ class FilterManager
         return Cache::remember($cacheKey, $cacheTTL, function () use ($handler, $page, $perPage) {
             return $handler->getValues(null, $page, $perPage);
         });
+    }
+
+    /**
+     * Get aggregation counts for filter values
+     */
+    protected function getAggregationCounts(Filter $filter, array $filterConfig, array $context = []): array
+    {
+        $targetModel = $filterConfig['applies_to'][0] === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
+        $fields = $filterConfig['fields'][$filterConfig['applies_to'][0]] ?? [];
+
+        if (empty($fields)) {
+            return [];
+        }
+
+        $field = $fields[0]; // Use first field for aggregation
+        $aggSize = $filterConfig['aggregation']['size'] ?? 50;
+
+        // Determine the actual field to aggregate on
+        $aggField = $field;
+
+        // If it's a text field, we usually need .keyword. 
+        // If it's keyword, we use it directly.
+        // For safety, let's try to detect if it's already a keyword field from the filter type
+        $isKeyword = ($filter->value_type === 'keyword' || $filter->value_type === 'boolean');
+        if (!$isKeyword && !str_ends_with($aggField, '.keyword')) {
+            $aggField .= '.keyword';
+        }
+
+        try {
+            $queryBuilder = new ElasticQueryBuilder($targetModel);
+
+            // Extract the correct bucket from the DSL (contact/company)
+            // The frontend passes a canonical DSL: { contact: {...}, company: {...} }
+            $contactContext = $context['contact'] ?? [];
+            $companyContext = $context['company'] ?? [];
+
+            // If the context is passed as a flat array (from older code/tests), try to use it directly
+            if (empty($contactContext) && empty($companyContext) && !empty($context)) {
+                // Heuristic: if no contact/company keys, assume it's a flat context for the current target
+                if (($filterConfig['applies_to'][0] ?? '') === 'contact') {
+                    $contactContext = $context;
+                } else {
+                    $companyContext = $context;
+                }
+            }
+
+            // Exclude current filter from its own facet calculation
+            unset($contactContext[$filter->filter_id]);
+            unset($companyContext[$filter->filter_id]);
+
+            if (!empty($contactContext)) {
+                $this->applyFilters($queryBuilder, $contactContext, 'contact');
+            }
+            if (!empty($companyContext)) {
+                $this->applyFilters($queryBuilder, $companyContext, 'company');
+            }
+
+            $query = [
+                'query' => $queryBuilder->toArray()['query'] ?? ['match_all' => (object) []],
+                'size' => 0,
+                'aggs' => [
+                    'values' => [
+                        'terms' => [
+                            'field' => $aggField,
+                            'size' => $aggSize,
+                        ],
+                    ],
+                ],
+            ];
+
+            $result = $targetModel::searchInElastic($query);
+            $buckets = $result['aggregations']['values']['buckets'] ?? [];
+
+            $counts = [];
+            foreach ($buckets as $bucket) {
+                $counts[$bucket['key']] = $bucket['doc_count'];
+            }
+
+            return $counts;
+        } catch (\Throwable $e) {
+            \Log::error('Failed to get aggregation counts', [
+                'filter_id' => $filter->filter_id,
+                'field' => $field,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     /**
@@ -228,9 +371,9 @@ class FilterManager
         return match ($filter->value_source) {
             'predefined' => self::CACHE_TTL['predefined'],
             'specialized' => match ($filter->value_type) {
-                'location' => self::CACHE_TTL['location'],
-                default => 0
-            },
+                    'location' => self::CACHE_TTL['location'],
+                    default => 0
+                },
             'elasticsearch' => self::CACHE_TTL['elasticsearch'],
             default => 0 // Don't cache other types
         };

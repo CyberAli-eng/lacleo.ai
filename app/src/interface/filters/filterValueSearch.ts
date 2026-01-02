@@ -9,6 +9,7 @@ export interface IFilterValueResponseMetadata {
 export type IFilterValue = {
   id: string
   name: string
+  count?: number | string | null
 }
 
 export interface IFilterResponse<T> {
@@ -28,6 +29,7 @@ export interface IFilterSearchParams {
   page: string
   count: string
   q?: string
+  filter_dsl?: any
 }
 
 export type SortDirection = "asc" | "desc"

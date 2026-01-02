@@ -44,7 +44,7 @@ const AISearchInput: React.FC<AISearchInputProps> = ({
 
   return (
     <div className={`mx-auto w-full space-y-4 ${className}`}>
-      <div className="rounded-lg border bg-gray-50 p-[18px]">
+      <div className="rounded-lg border bg-gray-50 p-3">
         <textarea
           value={searchQuery}
           onChange={(e) => {

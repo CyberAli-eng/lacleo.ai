@@ -38,6 +38,7 @@ class ExportController extends Controller
             'fields' => 'sometimes|array',
             'fields.email' => 'sometimes|boolean',
             'fields.phone' => 'sometimes|boolean',
+            'filter_dsl' => 'sometimes|array',
         ]);
 
         $emailCount = 0;
@@ -54,16 +55,33 @@ class ExportController extends Controller
                 if ($validated['type'] === 'contacts') {
                     // Decode contact IDs
                     $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
-                    
+
                     Log::info('ExportController preview - contacts', ['ids_input' => $validated['ids'], 'ids_decoded' => $decodedIds]);
-                    
+
                     // If IDs array is empty, fetch bulk records; otherwise filter by IDs
                     if (empty($decodedIds)) {
                         $base = Contact::elastic()->index((new Contact())->elasticReadAlias());
+                        // Apply filter DSL if provided
+                        $dsl = $request->input('filter_dsl');
+                        if (is_string($dsl)) {
+                            $decoded = json_decode($dsl, true);
+                            $dsl = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+                        }
+                        if (is_array($dsl)) {
+                            $contactFilters = is_array($dsl['contact'] ?? null) ? $dsl['contact'] : [];
+                            $companyFilters = is_array($dsl['company'] ?? null) ? $dsl['company'] : [];
+                            $fm = new \App\Filters\FilterManager(new \App\Filters\FilterHandlerFactory());
+                            if (!empty($contactFilters)) {
+                                $fm->applyFilters($base, $contactFilters, 'contact');
+                            }
+                            if (!empty($companyFilters)) {
+                                $fm->applyFilters($base, $companyFilters, 'company');
+                            }
+                        }
                     } else {
                         $base = Contact::elastic()->index((new Contact())->elasticReadAlias())->filter(['terms' => ['_id' => $decodedIds]]);
                     }
-                    
+
                     if (!empty($validated['limit'])) {
                         $data = $base->paginate(1, (int) $validated['limit'])['data'] ?? [];
                         Log::info('ExportController preview - contacts fetched', ['count' => count($data), 'limit' => $validated['limit']]);
@@ -73,11 +91,12 @@ class ExportController extends Controller
                             Log::info('Contact source structure', ['has_emails' => isset($source['emails']), 'has_phones' => isset($source['phone_numbers'])]);
                             $norm = RecordNormalizer::normalizeContact($source);
                             Log::info('Normalized contact data', ['emails_count' => count($norm['emails'] ?? []), 'phones_count' => count($norm['phones'] ?? []), 'emails' => $norm['emails'] ?? [], 'phones' => $norm['phones'] ?? []]);
-                            // Count work emails (1 credit each)
+                            // Count work emails (1 credit each, max 1 per contact)
                             if (!empty($norm['emails'])) {
                                 foreach ($norm['emails'] as $e) {
                                     if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
                                         $emailCount++;
+                                        break;
                                     }
                                 }
                             }
@@ -97,11 +116,12 @@ class ExportController extends Controller
                             foreach ($data as $c) {
                                 $source = $c['_source'] ?? $c;
                                 $norm = RecordNormalizer::normalizeContact($source);
-                                // Count work emails (1 credit each)
+                                // Count work emails (1 credit each, max 1 per contact)
                                 if (!empty($norm['emails'])) {
                                     foreach ($norm['emails'] as $e) {
                                         if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
                                             $emailCount++;
+                                            break;
                                         }
                                     }
                                 }
@@ -120,28 +140,41 @@ class ExportController extends Controller
                 } else {
                     // For companies: decode IDs, fetch companies directly, no cross-checking, no credits
                     Log::info('ExportController preview - companies input', ['ids_count' => count($validated['ids']), 'ids' => $validated['ids']]);
-                    
+
                     $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
-                    
+
                     // If IDs array is empty, fetch bulk companies; otherwise fetch by IDs
                     if (empty($decodedIds)) {
-                        // Bulk export: fetch limit companies from Elasticsearch
+                        // Bulk export: fetch limit companies from Elasticsearch, applying DSL if provided
                         $limit = $validated['limit'] ?? 50;
-                        $result = Company::elastic()->index((new Company())->elasticReadAlias())->paginate(1, $limit);
+                        $builder = Company::elastic()->index((new Company())->elasticReadAlias());
+                        $dsl = $request->input('filter_dsl');
+                        if (is_string($dsl)) {
+                            $decoded = json_decode($dsl, true);
+                            $dsl = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+                        }
+                        if (is_array($dsl)) {
+                            $companyFilters = is_array($dsl['company'] ?? null) ? $dsl['company'] : [];
+                            if (!empty($companyFilters)) {
+                                $fm = new \App\Filters\FilterManager(new \App\Filters\FilterHandlerFactory());
+                                $fm->applyFilters($builder, $companyFilters, 'company');
+                            }
+                        }
+                        $result = $builder->paginate(1, $limit);
                         $companies = $result['data'] ?? [];
                         Log::info('ExportController preview - bulk companies fetch', ['count' => count($companies), 'limit' => $limit]);
                     } else {
                         $companies = array_map(function ($id) {
                             try {
                                 $company = null;
-                                
+
                                 try {
                                     $company = Company::findInElastic($id);
                                     Log::info('ExportController preview - findInElastic found', ['decoded_id' => $id]);
                                 } catch (\Exception $lookupEx) {
                                     Log::info('ExportController preview - findInElastic not found', ['decoded_id' => $id, 'error' => $lookupEx->getMessage()]);
                                 }
-                                
+
                                 // If not found by exact ID, try to find by domain
                                 if (!$company && strpos($id, '__') !== false) {
                                     $domain = explode('__', $id)[0]; // Extract domain from "domain__name__" format
@@ -153,21 +186,21 @@ class ExportController extends Controller
                                         Log::info('ExportController preview - found by domain fallback', ['domain' => $domain, 'found' => true]);
                                     }
                                 }
-                                
+
                                 return $company;
                             } catch (\Exception $e) {
                                 Log::error('ExportController preview - fatal error', ['id' => $id, 'error' => $e->getMessage()]);
                                 return null;
                             }
                         }, $decodedIds);
-                        
+
                         Log::info('ExportController preview - companies after mapping', ['count' => count($companies)]);
                         $companies = array_values(array_filter($companies));
                         Log::info('ExportController preview - companies after filtering', ['count' => count($companies)]);
                     }
 
                     // Company exports are free - no credits charged
-                    $contactsIncluded = 0;
+                    $contactsIncluded = count($companies);
                     $emailCount = 0;
                     $phoneCount = 0;
                 }
@@ -191,10 +224,10 @@ class ExportController extends Controller
 
         $emailSelected = (bool) (($validated['fields']['email'] ?? true));
         $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
-        
+
         // Calculate credits: 1 per work email, 4 per phone
         $creditsRequired = (($emailSelected ? $emailCount : 0) * 1) + (($phoneSelected ? $phoneCount : 0) * 4);
-        
+
         if (!empty($validated['sanitize'])) {
             $creditsRequired = 0;
         }
@@ -233,245 +266,280 @@ class ExportController extends Controller
             ]);
 
             $validated = $request->validate([
-            'type' => 'required|in:contacts,companies',
-            'ids' => 'required|array',
-            'ids.*' => 'string',
-            'sanitize' => 'sometimes|boolean',
-            'limit' => 'sometimes|integer|min:1|max:' . self::EXPORT_PAGE_SIZE(),
-            'fields' => 'sometimes|array',
-            'fields.email' => 'sometimes|boolean',
-            'fields.phone' => 'sometimes|boolean',
-        ]);
+                'type' => 'required|in:contacts,companies',
+                'ids' => 'required|array',
+                'ids.*' => 'string',
+                'sanitize' => 'sometimes|boolean',
+                'limit' => 'sometimes|integer|min:1|max:' . self::EXPORT_PAGE_SIZE(),
+                'fields' => 'sometimes|array',
+                'fields.email' => 'sometimes|boolean',
+                'fields.phone' => 'sometimes|boolean',
+            ]);
 
-        Log::info('ExportController export - VALIDATED', [
-            'type' => $validated['type'],
-            'ids_count' => count($validated['ids']),
-            'ids' => $validated['ids'],
-            'limit' => $validated['limit'] ?? 'not set',
-            'fields' => $validated['fields'] ?? [],
-            'sanitize' => $validated['sanitize'] ?? false,
-        ]);
+            Log::info('ExportController export - VALIDATED', [
+                'type' => $validated['type'],
+                'ids_count' => count($validated['ids']),
+                'ids' => $validated['ids'],
+                'limit' => $validated['limit'] ?? 'not set',
+                'fields' => $validated['fields'] ?? [],
+                'sanitize' => $validated['sanitize'] ?? false,
+            ]);
 
-        $requestId = $request->header('X-Request-Id') ?: ($request->header('request_id') ?: ($request->input('requestId') ?: strtolower(Str::ulid())));
+            $requestId = $request->header('X-Request-Id') ?: ($request->header('request_id') ?: ($request->input('requestId') ?: strtolower(Str::ulid())));
 
-        if ($requestId) {
-            $existing = \App\Models\CreditTransaction::where('type', 'spend')
-                ->where('meta->request_id', $requestId)
-                ->first();
-            if ($existing && ($existing->meta['result'] ?? null)) {
-                $remaining = (int) optional($request->user())->id ? (int) \App\Models\Workspace::firstOrCreate([
-                    'owner_user_id' => $request->user()->id,
-                ], [
-                    'id' => (string) strtolower(\Illuminate\Support\Str::ulid()),
-                    'credit_balance' => 0,
-                    'credit_reserved' => 0,
-                ])->credit_balance : 0;
+            if ($requestId) {
+                $existing = \App\Models\CreditTransaction::where('type', 'spend')
+                    ->where('meta->request_id', $requestId)
+                    ->first();
+                if ($existing && ($existing->meta['result'] ?? null)) {
+                    $remaining = (int) optional($request->user())->id ? (int) \App\Models\Workspace::firstOrCreate([
+                        'owner_user_id' => $request->user()->id,
+                    ], [
+                        'id' => (string) strtolower(\Illuminate\Support\Str::ulid()),
+                        'credit_balance' => 0,
+                        'credit_reserved' => 0,
+                    ])->credit_balance : 0;
 
-                return response()->json([
-                    'url' => $existing->meta['result']['url'],
-                    'credits_deducted' => abs((int) $existing->amount),
-                    'remaining_credits' => $remaining,
-                    'request_id' => $requestId,
-                ]);
+                    return response()->json([
+                        'url' => $existing->meta['result']['url'],
+                        'credits_deducted' => abs((int) $existing->amount),
+                        'remaining_credits' => $remaining,
+                        'request_id' => $requestId,
+                    ]);
+                }
             }
-        }
 
-        $contacts = [];
-        $companies = [];
-        $limit = (int) ($validated['limit'] ?? self::EXPORT_PAGE_SIZE());
-        $limit = min($limit, self::EXPORT_PAGE_SIZE());
-        
-        if ($validated['type'] === 'contacts') {
-            // Decode contact IDs (convert + to spaces)
-            $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
-            
-            // If IDs array is empty, fetch bulk records; otherwise filter by IDs
-            if (empty($decodedIds)) {
-                $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
-                    ->paginate(1, $limit);
-            } else {
-                $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
-                    ->filter(['terms' => ['_id' => $decodedIds]])
-                    ->paginate(1, $limit);
-            }
-            $contacts = array_map(fn($c) => RecordNormalizer::normalizeContact($c), $result['data']);
-        } else {
-            // For companies: decode IDs and fetch only companies, no cross-checking with contacts
-            Log::info('ExportController export - companies input', ['ids_count' => count($validated['ids']), 'ids' => $validated['ids']]);
-            
-            $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
-            
-            // If IDs array is empty, fetch bulk companies; otherwise fetch by IDs
-            if (empty($decodedIds)) {
-                $result = Company::elastic()->index((new Company())->elasticReadAlias())->paginate(1, $limit);
-                $companies = $result['data'] ?? [];
-                Log::info('ExportController export - bulk companies fetch', ['count' => count($companies), 'limit' => $limit]);
-            } else {
-                $companies = array_map(function ($id) {
-                    try {
-                        $company = null;
-                        
-                        try {
-                            $company = Company::findInElastic($id);
-                            Log::info('ExportController export - findInElastic found', ['decoded_id' => $id]);
-                        } catch (\Exception $lookupEx) {
-                            Log::info('ExportController export - findInElastic not found', ['decoded_id' => $id, 'error' => $lookupEx->getMessage()]);
-                        }
-                        
-                        // If not found by exact ID, try to find by domain
-                        if (!$company && strpos($id, '__') !== false) {
-                            $domain = explode('__', $id)[0]; // Extract domain from "domain__name__" format
-                            Log::info('ExportController export - finding by domain fallback', ['domain' => $domain]);
-                            $paginated = Company::elastic()->filter(['term' => ['website' => $domain]])->paginate(1, 1);
-                            $results = $paginated['data'] ?? [];
-                            if (count($results) > 0) {
-                                $company = $results[0];
-                                Log::info('ExportController export - found by domain fallback', ['domain' => $domain, 'found' => true]);
-                            }
-                        }
-                        
-                        return $company;
-                    } catch (\Exception $e) {
-                        Log::error('ExportController export - fatal error', ['id' => $id, 'error' => $e->getMessage()]);
-                        return null;
+            $contacts = [];
+            $companies = [];
+            $limit = (int) ($validated['limit'] ?? self::EXPORT_PAGE_SIZE());
+            $limit = min($limit, self::EXPORT_PAGE_SIZE());
+
+            if ($validated['type'] === 'contacts') {
+                // Decode contact IDs (convert + to spaces)
+                $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
+
+                // If IDs array is empty, fetch bulk records; otherwise filter by IDs
+                if (empty($decodedIds)) {
+                    $base = Contact::elastic()->index((new Contact())->elasticReadAlias());
+
+                    // Apply filter DSL if provided
+                    $dsl = $request->input('filter_dsl');
+                    if (is_string($dsl)) {
+                        $decoded = json_decode($dsl, true);
+                        $dsl = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
                     }
-                }, $decodedIds);
-                
-                Log::info('ExportController export - companies after mapping', ['count' => count($companies)]);
-                $companies = array_values(array_filter($companies));
-                Log::info('ExportController export - companies after filtering', ['count' => count($companies)]);
+                    if (is_array($dsl)) {
+                        $contactFilters = is_array($dsl['contact'] ?? null) ? $dsl['contact'] : [];
+                        $companyFilters = is_array($dsl['company'] ?? null) ? $dsl['company'] : [];
+                        $fm = new \App\Filters\FilterManager(new \App\Filters\FilterHandlerFactory());
+                        if (!empty($contactFilters)) {
+                            $fm->applyFilters($base, $contactFilters, 'contact');
+                        }
+                        if (!empty($companyFilters)) {
+                            $fm->applyFilters($base, $companyFilters, 'company');
+                        }
+                    }
+
+                    $result = $base->paginate(1, $limit);
+                } else {
+                    $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
+                        ->filter(['terms' => ['_id' => $decodedIds]])
+                        ->paginate(1, $limit);
+                }
+                $contacts = array_map(fn($c) => RecordNormalizer::normalizeContact($c), $result['data']);
+            } else {
+                // For companies: decode IDs and fetch only companies, no cross-checking with contacts
+                Log::info('ExportController export - companies input', ['ids_count' => count($validated['ids']), 'ids' => $validated['ids']]);
+
+                $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $validated['ids']);
+
+                // If IDs array is empty, fetch bulk companies; otherwise fetch by IDs
+                if (empty($decodedIds)) {
+                    $builder = Company::elastic()->index((new Company())->elasticReadAlias());
+
+                    // Apply filter DSL if provided
+                    $dsl = $request->input('filter_dsl');
+                    if (is_string($dsl)) {
+                        $decoded = json_decode($dsl, true);
+                        $dsl = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+                    }
+                    if (is_array($dsl)) {
+                        $companyFilters = is_array($dsl['company'] ?? null) ? $dsl['company'] : [];
+                        if (!empty($companyFilters)) {
+                            $fm = new \App\Filters\FilterManager(new \App\Filters\FilterHandlerFactory());
+                            $fm->applyFilters($builder, $companyFilters, 'company');
+                        }
+                    }
+
+                    $result = $builder->paginate(1, $limit);
+                    $companies = $result['data'] ?? [];
+                    Log::info('ExportController export - bulk companies fetch', ['count' => count($companies), 'limit' => $limit]);
+                } else {
+                    $companies = array_map(function ($id) {
+                        try {
+                            $company = null;
+
+                            try {
+                                $company = Company::findInElastic($id);
+                                Log::info('ExportController export - findInElastic found', ['decoded_id' => $id]);
+                            } catch (\Exception $lookupEx) {
+                                Log::info('ExportController export - findInElastic not found', ['decoded_id' => $id, 'error' => $lookupEx->getMessage()]);
+                            }
+
+                            // If not found by exact ID, try to find by domain
+                            if (!$company && strpos($id, '__') !== false) {
+                                $domain = explode('__', $id)[0]; // Extract domain from "domain__name__" format
+                                Log::info('ExportController export - finding by domain fallback', ['domain' => $domain]);
+                                $paginated = Company::elastic()->filter(['term' => ['website' => $domain]])->paginate(1, 1);
+                                $results = $paginated['data'] ?? [];
+                                if (count($results) > 0) {
+                                    $company = $results[0];
+                                    Log::info('ExportController export - found by domain fallback', ['domain' => $domain, 'found' => true]);
+                                }
+                            }
+
+                            return $company;
+                        } catch (\Exception $e) {
+                            Log::error('ExportController export - fatal error', ['id' => $id, 'error' => $e->getMessage()]);
+                            return null;
+                        }
+                    }, $decodedIds);
+
+                    Log::info('ExportController export - companies after mapping', ['count' => count($companies)]);
+                    $companies = array_values(array_filter($companies));
+                    Log::info('ExportController export - companies after filtering', ['count' => count($companies)]);
+                }
+
+                $companiesNorm = array_map(function ($c) {
+                    return $c ? RecordNormalizer::normalizeCompany(is_array($c) ? $c : $c->toArray()) : null;
+                }, $companies);
+                $companiesNorm = array_values(array_filter($companiesNorm));
+
+                // Debug: how many companies fetched/normalized for export
+                Log::info('ExportController export - companies_fetched', ['companies_fetched' => count($companies), 'companies_norm' => count($companiesNorm)]);
+
+                // Don't cross-check contacts for company exports - just export companies
+                $request->attributes->add(['export_companies' => $companiesNorm]);
             }
-            
-            $companiesNorm = array_map(function ($c) {
-                return $c ? RecordNormalizer::normalizeCompany(is_array($c) ? $c : $c->toArray()) : null;
-            }, $companies);
-            $companiesNorm = array_values(array_filter($companiesNorm));
 
-            // Debug: how many companies fetched/normalized for export
-            Log::info('ExportController export - companies_fetched', ['companies_fetched' => count($companies), 'companies_norm' => count($companiesNorm)]);
+            if (count($contacts) > 50000) {
+                return response()->json(['error' => 'Too many records'], 422);
+            }
+            if (count($companies) > 50000) {
+                return response()->json(['error' => 'Too many records'], 422);
+            }
 
-            // Don't cross-check contacts for company exports - just export companies
-            $request->attributes->add(['export_companies' => $companiesNorm]);
-        }
+            $sanitize = !empty($validated['sanitize']);
+            $emailSelected = (bool) (($validated['fields']['email'] ?? true));
+            $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
 
-        if (count($contacts) > 50000) {
-            return response()->json(['error' => 'Too many records'], 422);
-        }
-        if (count($companies) > 50000) {
-            return response()->json(['error' => 'Too many records'], 422);
-        }
-
-        $sanitize = !empty($validated['sanitize']);
-        $emailSelected = (bool) (($validated['fields']['email'] ?? true));
-        $phoneSelected = (bool) (($validated['fields']['phone'] ?? true));
-        
-        Log::info('ExportController export - generating CSV', [
-            'type' => $validated['type'],
-            'emailSelected' => $emailSelected,
-            'phoneSelected' => $phoneSelected,
-            'contactsCount' => count($contacts),
-            'companiesCount' => $validated['type'] === 'companies' ? count((array) $request->attributes->get('export_companies')) : 0
-        ]);
-        
-        if ($validated['type'] === 'companies') {
-            // Export companies only - no contacts
-            Log::info('ExportController export - Building companies CSV', [
-                'companies_from_attributes' => count((array) $request->attributes->get('export_companies')),
+            Log::info('ExportController export - generating CSV', [
+                'type' => $validated['type'],
                 'emailSelected' => $emailSelected,
                 'phoneSelected' => $phoneSelected,
+                'contactsCount' => count($contacts),
+                'companiesCount' => $validated['type'] === 'companies' ? count((array) $request->attributes->get('export_companies')) : 0
             ]);
-            
-            $csv = \App\Exports\ExportCsvBuilder::buildCompaniesCsvDynamic((array) $request->attributes->get('export_companies'), [], $emailSelected, $phoneSelected);
-            
-            Log::info('ExportController export - CSV built', [
-                'csv_length' => strlen($csv),
-                'csv_preview' => substr($csv, 0, 200),
-            ]);
-        } else {
-            // Export contacts only
-            $csv = \App\Exports\ExportCsvBuilder::buildContactsCsvDynamic($contacts, $emailSelected, $phoneSelected);
-        }
 
-        // Stream if requested (only if explicitly requested via query parameter)
-        if ($request->query('stream') === 'true') {
-            return response($csv, 200, [
-                'Content-Type' => 'text/csv',
-                'Content-Disposition' => 'attachment; filename="export.csv"',
-            ]);
-        }
+            if ($validated['type'] === 'companies') {
+                // Export companies only - no contacts
+                Log::info('ExportController export - Building companies CSV', [
+                    'companies_from_attributes' => count((array) $request->attributes->get('export_companies')),
+                    'emailSelected' => $emailSelected,
+                    'phoneSelected' => $phoneSelected,
+                ]);
 
-        try {
-            $path = 'exports/' . strtolower(Str::ulid()) . '.csv';
-            Log::info('ExportController export - Attempting to save file', ['path' => $path]);
-            Storage::disk('public')->put($path, $csv);
-            Log::info('ExportController export - File saved successfully', ['path' => $path]);
-        } catch (\Exception $e) {
-            Log::error('ExportController export - Failed to save file', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            return response()->json(['error' => 'EXPORT_FAILED', 'message' => 'Failed to save export file: ' . $e->getMessage()], 500);
-        }
-        // Build the public URL from filesystem config if available, otherwise fallback to app url + /storage
-        $diskUrl = config('filesystems.disks.public.url') ?? null;
-        if ($diskUrl) {
-            $url = rtrim($diskUrl, '/') . '/' . ltrim($path, '/');
-        } else {
-            $appUrl = rtrim(config('app.url'), '/');
-            if ($appUrl) {
-                $url = $appUrl . '/storage/' . ltrim($path, '/');
+                $csv = \App\Exports\ExportCsvBuilder::buildCompaniesCsvDynamic((array) $request->attributes->get('export_companies'), [], $emailSelected, $phoneSelected);
+
+                Log::info('ExportController export - CSV built', [
+                    'csv_length' => strlen($csv),
+                    'csv_preview' => substr($csv, 0, 200),
+                ]);
             } else {
-                $url = $path;
+                // Export contacts only
+                $csv = \App\Exports\ExportCsvBuilder::buildContactsCsvDynamic($contacts, $emailSelected, $phoneSelected);
             }
-        }
-        
-        Log::info('Export CSV created', [
-            'path' => $path,
-            'url' => $url,
-            'requestId' => $requestId,
-            'type' => $validated['type']
-        ]);
-        
-        if ($requestId) {
-            $tx = \App\Models\CreditTransaction::where('type', 'spend')
-                ->where('meta->request_id', $requestId)
-                ->orderByDesc('created_at')
-                ->first();
-            if ($tx) {
-                $meta = $tx->meta ?? [];
-                $meta['result'] = [
-                    'url' => $url,
-                    'email_count' => $request->attributes->get('export_email_count'),
-                    'phone_count' => $request->attributes->get('export_phone_count'),
-                    'contacts_included' => $request->attributes->get('export_contacts_included'),
-                    'credits_required' => $request->attributes->get('credits_required'),
-                ];
-                $tx->update(['meta' => $meta]);
+
+            // Stream if requested (only if explicitly requested via query parameter)
+            if ($request->query('stream') === 'true') {
+                return response($csv, 200, [
+                    'Content-Type' => 'text/csv',
+                    'Content-Disposition' => 'attachment; filename="export.csv"',
+                ]);
             }
-        }
 
-        $remaining = (int) optional($request->user())->id ? (int) \App\Models\Workspace::firstOrCreate([
-            'owner_user_id' => $request->user()->id,
-        ], [
-            'id' => (string) strtolower(\Illuminate\Support\Str::ulid()),
-            'credit_balance' => 0,
-            'credit_reserved' => 0,
-        ])->credit_balance : 0;
+            try {
+                $path = 'exports/' . strtolower(Str::ulid()) . '.csv';
+                Log::info('ExportController export - Attempting to save file', ['path' => $path]);
+                Storage::disk('public')->put($path, $csv);
+                Log::info('ExportController export - File saved successfully', ['path' => $path]);
+            } catch (\Exception $e) {
+                Log::error('ExportController export - Failed to save file', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json(['error' => 'EXPORT_FAILED', 'message' => 'Failed to save export file: ' . $e->getMessage()], 500);
+            }
+            // Build the public URL from filesystem config if available, otherwise fallback to app url + /storage
+            $diskUrl = config('filesystems.disks.public.url') ?? null;
+            if ($diskUrl) {
+                $url = rtrim($diskUrl, '/') . '/' . ltrim($path, '/');
+            } else {
+                $appUrl = rtrim(config('app.url'), '/');
+                if ($appUrl) {
+                    $url = $appUrl . '/storage/' . ltrim($path, '/');
+                } else {
+                    $url = $path;
+                }
+            }
 
-        // Return the direct storage URL instead of download endpoint
-        Log::info('ExportController export - RESPONSE', [
-            'url' => $url,
-            'credits_deducted' => (int) $request->attributes->get('credits_required'),
-            'remaining_credits' => $remaining,
-            'request_id' => $requestId,
-        ]);
-        
-        return response()->json([
-            'url' => $url,
-            'credits_deducted' => (int) $request->attributes->get('credits_required'),
-            'remaining_credits' => $remaining,
-            'request_id' => $requestId,
-        ]);
+            Log::info('Export CSV created', [
+                'path' => $path,
+                'url' => $url,
+                'requestId' => $requestId,
+                'type' => $validated['type']
+            ]);
+
+            if ($requestId) {
+                $tx = \App\Models\CreditTransaction::where('type', 'spend')
+                    ->where('meta->request_id', $requestId)
+                    ->orderByDesc('created_at')
+                    ->first();
+                if ($tx) {
+                    $meta = $tx->meta ?? [];
+                    $meta['result'] = [
+                        'url' => $url,
+                        'email_count' => $request->attributes->get('export_email_count'),
+                        'phone_count' => $request->attributes->get('export_phone_count'),
+                        'contacts_included' => $request->attributes->get('export_contacts_included'),
+                        'credits_required' => $request->attributes->get('credits_required'),
+                    ];
+                    $tx->update(['meta' => $meta]);
+                }
+            }
+
+            $remaining = (int) optional($request->user())->id ? (int) \App\Models\Workspace::firstOrCreate([
+                'owner_user_id' => $request->user()->id,
+            ], [
+                'id' => (string) strtolower(\Illuminate\Support\Str::ulid()),
+                'credit_balance' => 0,
+                'credit_reserved' => 0,
+            ])->credit_balance : 0;
+
+            // Return the direct storage URL instead of download endpoint
+            Log::info('ExportController export - RESPONSE', [
+                'url' => $url,
+                'credits_deducted' => (int) $request->attributes->get('credits_required'),
+                'remaining_credits' => $remaining,
+                'request_id' => $requestId,
+            ]);
+
+            return response()->json([
+                'url' => $url,
+                'credits_deducted' => (int) $request->attributes->get('credits_required'),
+                'remaining_credits' => $remaining,
+                'request_id' => $requestId,
+            ]);
         } catch (\Exception $e) {
             Log::error('ExportController export - EXCEPTION', [
                 'error' => $e->getMessage(),
@@ -501,11 +569,11 @@ class ExportController extends Controller
 
         $contacts = [];
         $companiesNorm = [];
-        
+
         if ($type === 'contacts') {
             // Decode contact IDs
             $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $ids);
-            
+
             $result = Contact::elastic()->index((new Contact())->elasticReadAlias())
                 ->filter(['terms' => ['_id' => $decodedIds]])
                 ->paginate(1, $limit);
@@ -513,7 +581,7 @@ class ExportController extends Controller
         } else {
             // For companies: decode IDs and fetch only companies, no cross-checking
             $decodedIds = array_map(fn($id) => self::decodeCompanyId($id), $ids);
-            
+
             $companies = array_map(function ($id) {
                 try {
                     return Company::findInElastic($id);
@@ -630,21 +698,8 @@ class ExportController extends Controller
         $format = $validated['format'] ?? 'csv';
 
         // 1. Calculate confirmed cost
-        // We charge for successful reveals/exports. 
-        // Typically we charge for WHAT WE DELIVER.
-        // But prompt says "Export must validate credits, lock, deduct when job starts".
-        // So we assume everything requested will be delivered or we refund?
-        // Let's Charge max first (lock), then refund difference? Or charge exact?
-        // "release/rollback on failure".
-
         $emailSelected = in_array('email', $fields) || in_array('emails', $fields);
         $phoneSelected = in_array('phone', $fields) || in_array('phone_numbers', $fields);
-
-        // We need to know accurate count to charge.
-        // Optimization: Use `preview` logic to get accurate counts (emailCount, phoneCount).
-
-        // Let's refactor `preview` logic to a service or reusable method later. 
-        // For now, assume we charge for count($ids) * calculated_cost, or just calculated cost from preview.
 
         // We'll run the "preview" calculation here to get exact cost.
         $previewData = $this->calculateExportStats($ids, ['email' => $emailSelected, 'phone' => $phoneSelected]);
@@ -654,8 +709,6 @@ class ExportController extends Controller
         $requestId = $request->header('request_id') ?: Str::uuid()->toString();
 
         // 2. Charge/Lock Credits
-        // We use chargeReveal structure or manual transaction.
-        // Let's do manual transaction here since it's a batch.
 
         DB::beginTransaction();
         try {
@@ -733,10 +786,17 @@ class ExportController extends Controller
 
             foreach ($data as $c) {
                 $norm = RecordNormalizer::normalizeContact($c);
-                if (!empty($norm['emails']))
-                    $emailCount++;
-                if (!empty($norm['phones']))
+                if (!empty($norm['emails'])) {
+                    foreach ($norm['emails'] as $e) {
+                        if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
+                            $emailCount++;
+                            break;
+                        }
+                    }
+                }
+                if (!empty($norm['mobile_number']) || !empty($norm['direct_number'])) {
                     $phoneCount++;
+                }
             }
 
             if ($page >= ($res['last_page'] ?? 1))

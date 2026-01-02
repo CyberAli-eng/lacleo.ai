@@ -12,7 +12,9 @@
 
         <!-- Scripts -->
         @routes
-        @vite(['resources/js/app.js', "resources/js/Pages/{$page['component']}.vue"])
+        @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
+            @vite(['resources/js/app.js', "resources/js/Pages/{$page['component']}.vue"])
+        @endif
         @inertiaHead
     </head>
     <body class="font-sans antialiased">
