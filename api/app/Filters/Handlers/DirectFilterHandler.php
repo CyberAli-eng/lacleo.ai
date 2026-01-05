@@ -6,7 +6,7 @@ use App\Elasticsearch\ElasticQueryBuilder;
 
 class DirectFilterHandler extends AbstractFilterHandler
 {
-    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
+    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array
     {
         return $this->emptyPaginatedResponse($page, $perPage);
     }

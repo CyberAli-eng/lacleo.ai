@@ -30,6 +30,7 @@ export interface DataTableProps<T> {
   sortSelected?: string[]
   searchPlaceholder?: string
   onSearch?: (value: string) => void
+  onSearchExecute?: () => void
   searchValue?: string
   onOpenEditColumns?: () => void
   entityType?: "contact" | "company"

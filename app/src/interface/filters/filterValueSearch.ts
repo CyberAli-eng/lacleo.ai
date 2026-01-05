@@ -30,6 +30,7 @@ export interface IFilterSearchParams {
   count: string
   q?: string
   filter_dsl?: any
+  search_type?: "contact" | "company"
 }
 
 export type SortDirection = "asc" | "desc"

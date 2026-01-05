@@ -152,7 +152,7 @@ class FilterRegistry
                     'contact' => ['company_obj.keywords'],
                 ],
                 'search' => ['enabled' => true, 'suggest_fields' => ['keywords']],
-                'filtering' => ['mode' => 'match', 'supports_exclusion' => true],
+                'filtering' => ['mode' => 'match', 'supports_exclusion' => true, 'split_on_comma' => true],
                 'sort_order' => 36,
                 'active' => true,
             ],

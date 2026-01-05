@@ -17,7 +17,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLocation } from "react-router-dom"
 import DownloadIcon from "../../static/media/icons/download-icon.svg?react"
-import { setLastResultCount, selectSemanticQuery, selectShowResults, setSearchQueryOnly } from "../aisearch/slice/searchslice"
+import { selectSemanticQuery, selectShowResults } from "../aisearch/slice/searchslice"
 import { DataTable } from "./baseDataTable"
 import { useCompanyLogoQuery } from "./slice/apiSlice"
 import { Avatar } from "@/components/ui/avatar"
@@ -29,7 +29,8 @@ import {
   setSort,
   executeSearch,
   setPage,
-  setCount
+  setCount,
+  setSearchTerm
 } from "@/features/searchExecution/slice/searchExecutionSlice"
 import { useDebounce } from "@/app/hooks/useDebounce"
 
@@ -67,11 +68,7 @@ export function CompaniesTable() {
   const queryValue = useAppSelector((state) => state.searchExecution.searchTerm) || ""
 
   const handleSearchChange = (val: string) => {
-    dispatch(setSearchQueryOnly(val))
-    // Also update execution slice? SearchLayout handles the input usually.
-    // But table search box might differ.
-    // For now, adhere to "Tables must read from store".
-    // If table has search input, it should dispatch actions.
+    dispatch(setSearchTerm(val))
   }
 
   // Removed local sort state
@@ -361,6 +358,10 @@ export function CompaniesTable() {
             sortSelected={sortSelected}
             searchPlaceholder="Search companies..."
             onSearch={handleSearchChange}
+            onSearchExecute={() => {
+              dispatch(setPage(1))
+              dispatch(executeSearch())
+            }}
             searchValue={queryValue}
             showCheckbox={true}
             selectedItems={selectedCompanies}

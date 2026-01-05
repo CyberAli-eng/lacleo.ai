@@ -7,7 +7,7 @@ import { useAppSelector } from "./reduxHooks"
 import { selectActiveFilters } from "@/features/filters/slice/filterSlice"
 import { buildFilterDSL } from "@/features/filters/adapter/querySerializer"
 
-export const useFilterSearch = () => {
+export const useFilterSearch = (targetType?: "contact" | "company") => {
   const [searchState, setSearchState] = useState<IFilterSearchState>({
     results: {},
     metadata: {},
@@ -72,7 +72,8 @@ export const useFilterSearch = () => {
           page,
           count: "10",
           ...(query && { q: query }),
-          filter_dsl: JSON.stringify(dsl) // Stringify for GET request compatibility
+          filter_dsl: JSON.stringify(dsl), // Stringify for GET request compatibility
+          search_type: targetType
         }).unwrap()
       }
 

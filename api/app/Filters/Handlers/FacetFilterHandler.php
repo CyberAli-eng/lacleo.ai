@@ -6,9 +6,10 @@ use App\Elasticsearch\ElasticQueryBuilder;
 
 class FacetFilterHandler extends AbstractFilterHandler
 {
-    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
+    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array
     {
-        $targetModel = $this->filter->getTargetModelOrFail();
+        $appliesTo = $searchType ?: ($this->filter->applies_to[0] ?? 'company');
+        $targetModel = $appliesTo === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
         $elastic = $targetModel::elastic();
 
         // Default to company context for values if not specified, 
@@ -18,13 +19,21 @@ class FacetFilterHandler extends AbstractFilterHandler
 
         // However, the registry has 'fields' per context.
         // We'll use the 'company' fields as default for value lookup if available, or first available.
-        $fields = $this->filter->settings['fields']['company'] ??
+        $fields = $this->filter->settings['fields'][$appliesTo] ??
+            $this->filter->settings['fields']['company'] ??
             $this->filter->settings['fields']['contact'] ?? [];
 
         $field = $fields[0] ?? null;
 
         if (!$field) {
             return $this->emptyPaginatedResponse($page, $perPage);
+        }
+
+        // Apply active filters (drill-down) if context is provided
+        if (!empty($context)) {
+            $entityContext = $appliesTo;
+            $fm = app(\App\Filters\FilterManager::class);
+            $fm->applyFilters($elastic, $context, $entityContext);
         }
 
         if (!empty($search)) {

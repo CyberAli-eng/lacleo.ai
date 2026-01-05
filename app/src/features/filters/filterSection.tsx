@@ -114,7 +114,7 @@ export const Filters = () => {
     return normalizeFilters(filterGroups)
   }, [filterGroups])
 
-  const { searchState, handleSearch, clearSearchResults } = useFilterSearch()
+  const { searchState, handleSearch, clearSearchResults } = useFilterSearch(currentEntity)
 
   const executeImmediateSearch = () => {
     const state = store.getState().filters.activeFilters

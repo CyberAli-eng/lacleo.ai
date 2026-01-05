@@ -170,10 +170,10 @@ const SearchLayout = ({ entity }: SearchLayoutProps) => {
 
           <div className="flex flex-row">
             <div
-              className={`shrink-0 overflow-y-auto transition-all duration-300 ease-in-out ${isFiltersOpen ? "w-80 opacity-100" : "w-0 overflow-hidden opacity-0"
+              className={`shrink-0 sticky top-4 h-[calc(100vh-2rem)] transition-all duration-300 ease-in-out ${isFiltersOpen ? "w-80 opacity-100" : "w-0 overflow-hidden opacity-0"
                 }`}
             >
-              <div className="py-4">
+              <div className="h-full">
                 <Filters />
               </div>
             </div>

@@ -19,7 +19,7 @@ class BillingController extends Controller
     public function usage(Request $request)
     {
         $user = $request->user();
-        if (! $user) {
+        if (!$user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -43,14 +43,14 @@ class BillingController extends Controller
                 ->whereBetween('created_at', [$periodStart, $periodEnd])
                 ->get();
 
-            $used = $transactions->where('amount', '<', 0)->sum(fn ($t) => abs($t->amount));
+            $used = $transactions->where('amount', '<', 0)->sum(fn($t) => abs($t->amount));
 
             $revealEmail = $transactions
-                ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_email'))
-                ->sum(fn ($t) => abs($t->amount));
+                ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_email'))
+                ->sum(fn($t) => abs($t->amount));
             $revealPhone = $transactions
-                ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_phone'))
-                ->sum(fn ($t) => abs($t->amount));
+                ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_phone'))
+                ->sum(fn($t) => abs($t->amount));
         } catch (\Throwable $e) {
             return response()->json([
                 'balance' => 0,
@@ -72,15 +72,15 @@ class BillingController extends Controller
 
         // Exports are recorded with meta email_count and phone_count; compute per-category credits
         $exportEmailCredits = $transactions
-            ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
-            ->sum(fn ($t) => (int) (($t->meta['email_count'] ?? 0) * 1));
+            ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
+            ->sum(fn($t) => (int) (($t->meta['email_count'] ?? 0) * 1));
         $exportPhoneCredits = $transactions
-            ->filter(fn ($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
-            ->sum(fn ($t) => (int) (($t->meta['phone_count'] ?? 0) * 4));
+            ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
+            ->sum(fn($t) => (int) (($t->meta['phone_count'] ?? 0) * 4));
 
         $adjustmentsDebited = $transactions
-            ->filter(fn ($t) => $t->type === 'adjustment' && $t->amount < 0)
-            ->sum(fn ($t) => abs($t->amount));
+            ->filter(fn($t) => $t->type === 'adjustment' && $t->amount < 0)
+            ->sum(fn($t) => abs($t->amount));
 
         $breakdown = [
             'reveal_email' => (int) $revealEmail,
@@ -103,7 +103,7 @@ class BillingController extends Controller
             'period_start' => $periodStart->toIso8601String(),
             'period_end' => $periodEnd->toIso8601String(),
             'breakdown' => $breakdown,
-            'free_grants_total' => (int) $transactions->filter(fn ($t) => $t->type === 'adjustment' && $t->amount > 0)->sum(fn ($t) => $t->amount),
+            'free_grants_total' => (int) $transactions->filter(fn($t) => $t->type === 'adjustment' && $t->amount > 0)->sum(fn($t) => $t->amount),
             'stripe_enabled' => $stripeEnabled,
         ]);
     }
@@ -112,9 +112,9 @@ class BillingController extends Controller
     {
         $admin = $request->user();
 
-        $adminEmails = array_map('strtolower', array_filter(array_map('trim', explode(',', (string) env('ADMIN_EMAILS', 'shaizqurashi12345@gmail.com')))));
+        $adminEmails = array_map('strtolower', array_filter(array_map('trim', explode(',', (string) env('ADMIN_EMAILS', '')))));
         $isAdmin = in_array(strtolower($admin->email ?? ''), $adminEmails, true);
-        if (! $isAdmin) {
+        if (!$isAdmin) {
             return response()->json(['error' => 'ADMIN_REQUIRED'], 403);
         }
 
@@ -183,13 +183,13 @@ class BillingController extends Controller
         $secret = Config::get('services.stripe.secret');
         $pack = (int) $request->input('pack');
 
-        if (! $secret || ! in_array($pack, [500, 2000, 10000], true)) {
+        if (!$secret || !in_array($pack, [500, 2000, 10000], true)) {
             return response()->json(['error' => 'Invalid pack'], 400);
         }
 
         $stripe = new StripeClient($secret);
 
-        if (! $workspace->stripe_customer_id) {
+        if (!$workspace->stripe_customer_id) {
             $customer = $stripe->customers->create(['email' => $user->email, 'name' => $user->name]);
             $workspace->update(['stripe_customer_id' => $customer->id]);
         }
@@ -206,15 +206,17 @@ class BillingController extends Controller
 
         $session = $stripe->checkout->sessions->create([
             'mode' => 'payment',
-            'line_items' => [[
-                'price_data' => [
-                    'currency' => 'usd',
-                    'product_data' => ['name' => "Credits Pack {$pack}"],
-                    'unit_amount' => $unitAmount,
-                ],
-                'quantity' => 1,
-            ]],
-            'success_url' => url('/billing/success').'?session_id={CHECKOUT_SESSION_ID}',
+            'line_items' => [
+                [
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => ['name' => "Credits Pack {$pack}"],
+                        'unit_amount' => $unitAmount,
+                    ],
+                    'quantity' => 1,
+                ]
+            ],
+            'success_url' => url('/billing/success') . '?session_id={CHECKOUT_SESSION_ID}',
             'cancel_url' => url('/billing/cancel'),
             'customer' => $workspace->stripe_customer_id,
             'metadata' => [
@@ -245,29 +247,31 @@ class BillingController extends Controller
         $secret = Config::get('services.stripe.secret');
         $planId = $request->input('plan_id');
 
-        if (! $secret || ! $planId) {
+        if (!$secret || !$planId) {
             return response()->json(['error' => 'Stripe not configured'], 500);
         }
 
         $stripe = new StripeClient($secret);
 
-        if (! $workspace->stripe_customer_id) {
+        if (!$workspace->stripe_customer_id) {
             $customer = $stripe->customers->create(['email' => $user->email, 'name' => $user->name]);
             $workspace->update(['stripe_customer_id' => $customer->id]);
         }
 
         $plan = \App\Models\Plan::find($planId);
-        if (! $plan || ! $plan->stripe_price_id) {
+        if (!$plan || !$plan->stripe_price_id) {
             return response()->json(['error' => 'Invalid plan'], 400);
         }
 
         $session = $stripe->checkout->sessions->create([
             'mode' => 'subscription',
-            'line_items' => [[
-                'price' => $plan->stripe_price_id,
-                'quantity' => 1,
-            ]],
-            'success_url' => url('/billing/success').'?session_id={CHECKOUT_SESSION_ID}',
+            'line_items' => [
+                [
+                    'price' => $plan->stripe_price_id,
+                    'quantity' => 1,
+                ]
+            ],
+            'success_url' => url('/billing/success') . '?session_id={CHECKOUT_SESSION_ID}',
             'cancel_url' => url('/billing/cancel'),
             'customer' => $workspace->stripe_customer_id,
             'metadata' => [
@@ -286,7 +290,7 @@ class BillingController extends Controller
         $user = $request->user();
         $secret = Config::get('services.stripe.secret');
 
-        if (! $secret) {
+        if (!$secret) {
             return response()->json(['error' => 'Stripe not configured'], 500);
         }
 
@@ -297,7 +301,7 @@ class BillingController extends Controller
             ['id' => (string) strtolower(Str::ulid()), 'credit_balance' => 0, 'credit_reserved' => 0]
         );
 
-        if (! $workspace->stripe_customer_id) {
+        if (!$workspace->stripe_customer_id) {
             $customer = $stripe->customers->create(['email' => $user->email, 'name' => $user->name]);
             $workspace->update(['stripe_customer_id' => $customer->id]);
         }
@@ -318,7 +322,7 @@ class BillingController extends Controller
         if (app()->environment('testing')) {
             $event = json_decode(json_encode($request->input()));
         } else {
-            if (! $secret || ! $webhookSecret) {
+            if (!$secret || !$webhookSecret) {
                 return response('', Response::HTTP_BAD_REQUEST);
             }
 
@@ -339,10 +343,10 @@ class BillingController extends Controller
             if ($workspaceId) {
                 DB::transaction(function () use ($workspaceId, $session, $meta) {
                     $workspace = Workspace::find($workspaceId);
-                    if (! $workspace) {
+                    if (!$workspace) {
                         return;
                     }
-                    if ((property_exists($session, 'customer') ? $session->customer : null) && ! $workspace->stripe_customer_id) {
+                    if ((property_exists($session, 'customer') ? $session->customer : null) && !$workspace->stripe_customer_id) {
                         $workspace->update(['stripe_customer_id' => $session->customer]);
                     }
                     $mode = property_exists($session, 'mode') ? $session->mode : null;
@@ -386,15 +390,15 @@ class BillingController extends Controller
             if ($subscriptionId && $priceId) {
                 DB::transaction(function () use ($subscriptionId, $priceId, $invoice) {
                     $subscription = Subscription::where('stripe_subscription_id', $subscriptionId)->first();
-                    if (! $subscription) {
+                    if (!$subscription) {
                         return;
                     }
                     $plan = \App\Models\Plan::where('stripe_price_id', $priceId)->first();
-                    if (! $plan) {
+                    if (!$plan) {
                         return;
                     }
                     $workspace = Workspace::find($subscription->workspace_id);
-                    if (! $workspace) {
+                    if (!$workspace) {
                         return;
                     }
                     $credits = (int) $plan->monthly_credits;

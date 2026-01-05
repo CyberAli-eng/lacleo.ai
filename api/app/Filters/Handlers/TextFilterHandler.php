@@ -9,7 +9,7 @@ use App\Services\FilterFieldResolver;
 
 class TextFilterHandler extends AbstractFilterHandler
 {
-    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
+    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array
     {
         if (empty($search)) {
             return $this->emptyPaginatedResponse($page, $perPage);
@@ -18,10 +18,11 @@ class TextFilterHandler extends AbstractFilterHandler
         // 1. Normalize (USA -> United States)
         $normalizedSearch = SearchTermNormalizer::normalize($search);
 
-        $targetModel = $this->filter->getTargetModelOrFail();
+        $appliesTo = $searchType ?: ($this->filter->applies_to[0] ?? 'company');
+        $targetModel = $appliesTo === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
         $elastic = $targetModel::elastic();
 
-        $entityContext = ($targetModel === \App\Models\Company::class) ? 'company' : 'contact';
+        $entityContext = $appliesTo;
         $suggestFields = $this->filter->settings['fields'][$entityContext] ?? [];
 
         if (empty($suggestFields)) {
@@ -87,6 +88,7 @@ class TextFilterHandler extends AbstractFilterHandler
 
         // Add aggregation for counts if context is present or for better suggestions
         $baseField = str_replace(['.sort', '.keyword'], '', $suggestFields[0]);
+        // Handle canonical DSL keyword subfield. Based on Contact.php mappings, we use .enum instead of .keyword
         $aggField = $this->filter->type === 'keyword' ? $baseField : $baseField . '.keyword';
 
         // Handle canonical DSL
@@ -110,12 +112,15 @@ class TextFilterHandler extends AbstractFilterHandler
             $this->manager->applyFilters($elastic, $companyContext, 'company');
         }
 
+        // Use case-insensitive regex if possible, or just broader regex and filter in PHP
+        $includeRegex = '.*' . preg_quote($normalizedSearch) . '.*';
+
         $elastic->size(0); // Only care about aggs for counts
         $elastic->aggregations([
             'suggestions' => [
                 'terms' => [
                     'field' => $aggField,
-                    'size' => 50, // Get more for better filtering/processing
+                    'size' => 200, // Fetch even more to allow for filtering/splitting in PHP
                     'include' => '.*' . preg_quote($normalizedSearch) . '.*'
                 ]
             ]
@@ -127,13 +132,26 @@ class TextFilterHandler extends AbstractFilterHandler
         $values = [];
         $seen = [];
 
+        // Check registry config first, then fallback to property on model
+        $shouldSplit = $this->filter->settings['filtering']['split_on_comma'] ?? ($this->filter->split_on_comma ?? false);
+
         foreach ($buckets as $bucket) {
-            $val = $bucket['key'];
+            $val = (string) $bucket['key'];
             $count = $bucket['doc_count'];
 
-            if ($val && !in_array(strtolower($val), $seen)) {
-                $values[] = ['id' => $val, 'name' => $val, 'count' => $count];
-                $seen[] = strtolower($val);
+            if ($val !== '') {
+                if ($shouldSplit && (str_contains($val, ',') || str_contains($val, ';') || str_contains($val, '|'))) {
+                    $parts = array_map('trim', preg_split('/[,;|]/', $val));
+                    foreach ($parts as $part) {
+                        if ($part !== '' && !in_array(strtolower($part), $seen) && stripos($part, $normalizedSearch) !== false) {
+                            $values[] = ['id' => $part, 'name' => $part, 'count' => -1]; // Count is inaccurate after split
+                            $seen[] = strtolower($part);
+                        }
+                    }
+                } elseif (!in_array(strtolower($val), $seen) && stripos($val, $normalizedSearch) !== false) {
+                    $values[] = ['id' => $val, 'name' => $val, 'count' => $count];
+                    $seen[] = strtolower($val);
+                }
             }
             if (count($values) >= $perPage)
                 break;
@@ -172,7 +190,7 @@ class TextFilterHandler extends AbstractFilterHandler
         return $this->paginateResults($values, $page, $perPage);
     }
 
-    private function processValue(array &$values, array &$seen, mixed $val, int $perPage, ?string $search): void
+    protected function processValue(array &$values, array &$seen, mixed $val, int $perPage, ?string $search): void
     {
         if (!$val)
             return;
@@ -197,7 +215,7 @@ class TextFilterHandler extends AbstractFilterHandler
         $this->processOne($values, $seen, $val, $perPage, $search);
     }
 
-    private function processOne(array &$values, array &$seen, mixed $val, int $perPage, ?string $search): void
+    protected function processOne(array &$values, array &$seen, mixed $val, int $perPage, ?string $search): void
     {
         if (!$val || !is_string($val))
             return;
@@ -209,8 +227,8 @@ class TextFilterHandler extends AbstractFilterHandler
         };
 
         // Comma-separated logic (e.g. "React, Vue")
-        if (str_contains($val, ',')) {
-            $parts = array_map('trim', explode(',', $val));
+        if (str_contains($val, ',') || str_contains($val, ';') || str_contains($val, '|')) {
+            $parts = array_map('trim', preg_split('/[,;|]/', $val));
             foreach ($parts as $part) {
                 if ($part && !in_array(strtolower($part), $seen) && $checkMatch($part)) {
                     $values[] = ['id' => $part, 'name' => $part, 'count' => 1];
@@ -276,58 +294,77 @@ class TextFilterHandler extends AbstractFilterHandler
         if (!empty($included)) {
             $clauses = [];
             foreach ($included as $val) {
-                // Detect if value is wrapped in quotes for exact matching
-                $isExactMatch = (preg_match('/^["\'](.+)["\']$/', $val, $matches));
-                $searchTerm = $isExactMatch ? $matches[1] : $val;
+                // Check if splitting is enabled for this filter (e.g. keywords, technologies)
+                $shouldSplit = $this->filter->settings['filtering']['split_on_comma'] ?? ($this->filter->split_on_comma ?? false);
+                $valuesToProcess = ($shouldSplit && (str_contains($val, ',') || str_contains($val, ';') || str_contains($val, '|')))
+                    ? array_map('trim', preg_split('/[,;|]/', $val))
+                    : [$val];
 
-                // 1. Normalize
-                $normalizedVal = SearchTermNormalizer::normalize($searchTerm);
+                foreach ($valuesToProcess as $subVal) {
+                    if (empty($subVal))
+                        continue;
 
-                // 2. Expand job title abbreviations (CTO -> Chief Technical Officer)
-                $expandedTerms = $this->expandJobTitleAbbreviation($normalizedVal);
+                    // Detect if value is wrapped in quotes for exact matching
+                    $isExactMatch = (preg_match('/^["\'](.+)["\']$/', $subVal, $matches));
+                    $searchTerm = $isExactMatch ? $matches[1] : $subVal;
 
-                // 3. Expand Region (Europe -> Countries)
-                $expandedCountries = SearchTermNormalizer::expandRegion($normalizedVal);
-                $termsToMatch = $expandedCountries ?: $expandedTerms;
+                    // 1. Normalize
+                    $normalizedVal = SearchTermNormalizer::normalize($searchTerm);
 
-                foreach ($termsToMatch as $matchTerm) {
-                    $termClauses = [];
-                    foreach ($fields as $field) {
-                        $baseField = str_replace(['.sort', '.keyword'], '', $field);
-                        $isKeyword = $this->filter->type === 'keyword';
 
-                        if ($isKeyword) {
-                            // KEYWORD MATCH
-                            if ($isExactMatch) {
-                                // Exact match only - use .keyword for precision
-                                $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField . '.keyword' => ['value' => $matchTerm, 'boost' => 100, 'case_insensitive' => true]]]);
+                    // 2. Expand job title abbreviations (CTO -> Chief Technical Officer)
+                    // Skip expansion if it's an exact match (quoted string)
+                    $expandedTerms = $isExactMatch ? [$normalizedVal] : $this->expandJobTitleAbbreviation($normalizedVal);
+
+                    // 3. Expand Region (Europe -> Countries)
+                    $expandedCountries = SearchTermNormalizer::expandRegion($normalizedVal);
+                    $termsToMatch = $expandedCountries ?: $expandedTerms;
+
+                    foreach ($termsToMatch as $matchTerm) {
+                        $termClauses = [];
+                        foreach ($fields as $field) {
+                            $baseField = str_replace(['.sort', '.keyword'], '', $field);
+                            $isKeyword = $this->filter->type === 'keyword';
+
+                            if ($isKeyword) {
+                                // KEYWORD MATCH
+                                if ($isExactMatch) {
+                                    // Exact match only - use the field itself (already keyword)
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField => ['value' => $matchTerm, 'boost' => 100, 'case_insensitive' => true]]]);
+                                } else {
+                                    // Fuzzy match
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField => ['value' => $matchTerm, 'boost' => 50, 'case_insensitive' => true]]]);
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['wildcard' => [$baseField => ['value' => '*' . $matchTerm . '*', 'boost' => 5, 'case_insensitive' => true]]]);
+                                }
                             } else {
-                                // Fuzzy match
-                                $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField => ['value' => $matchTerm, 'boost' => 50, 'case_insensitive' => true]]]);
-                                $termClauses[] = $this->wrapIfNested($baseField, ['wildcard' => [$baseField => ['value' => '*' . $matchTerm . '*', 'boost' => 5, 'case_insensitive' => true]]]);
-                            }
-                        } else {
-                            // TEXT MATCH
-                            if ($isExactMatch) {
-                                // Exact match only - use .keyword field
-                                $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField . '.keyword' => ['value' => $matchTerm, 'boost' => 200, 'case_insensitive' => true]]]);
-                            } else {
-                                // Fuzzy match - use all strategies
-                                $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField . '.keyword' => ['value' => $matchTerm, 'boost' => 100, 'case_insensitive' => true]]]);
-                                $termClauses[] = $this->wrapIfNested($baseField, ['match_phrase' => [$baseField => ['query' => $matchTerm, 'boost' => 20]]]);
-                                $termClauses[] = $this->wrapIfNested($baseField, [
-                                    'match' => [
-                                        $baseField => [
-                                            'query' => $matchTerm,
-                                            'operator' => 'and',
-                                            'boost' => 5
+                                // TEXT MATCH
+                                if ($isExactMatch) {
+                                    // Exact match only - use .keyword subfield for precision
+                                    // We use case_insensitive: true because users expect "Founder" to match "founder" even with quotes usually
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField . '.keyword' => ['value' => $matchTerm, 'boost' => 200, 'case_insensitive' => true]]]);
+                                } else {
+                                    // Fuzzy match - use all strategies
+                                    // 1. Try .keyword with case_insensitive (exact word match)
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['term' => [$baseField . '.keyword' => ['value' => $matchTerm, 'boost' => 100, 'case_insensitive' => true]]]);
+
+                                    // 2. Try phrase match on analyzed field
+                                    $termClauses[] = $this->wrapIfNested($baseField, ['match_phrase' => [$baseField => ['query' => $matchTerm, 'boost' => 20]]]);
+
+                                    // 3. Try standard match
+                                    $termClauses[] = $this->wrapIfNested($baseField, [
+                                        'match' => [
+                                            $baseField => [
+                                                'query' => $matchTerm,
+                                                'operator' => 'and',
+                                                'boost' => 5
+                                            ]
                                         ]
-                                    ]
-                                ]);
+                                    ]);
+                                }
                             }
                         }
+                        $clauses[] = ['bool' => ['should' => $termClauses, 'minimum_should_match' => 1]];
                     }
-                    $clauses[] = ['bool' => ['should' => $termClauses, 'minimum_should_match' => 1]];
                 }
             }
 

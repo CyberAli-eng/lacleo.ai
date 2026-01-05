@@ -132,8 +132,20 @@ const ExportLeads = ({ open, onClose, selectedCount, totalAvailable, selectedIds
         return
       }
 
-      // If custom mode, we might not need IDs, but let's send what we have + limit
-      if (exportCount <= 0) return
+      // If count is zero (e.g. empty custom input), set estimate to 0 immediately
+      if (exportCount <= 0) {
+        setEstimate({
+          email_count: 0,
+          phone_count: 0,
+          credits_required: 0,
+          total_rows: 0,
+          can_export_free: true,
+          remaining_before: 0,
+          remaining_after: 0
+        })
+        // Do not return here, allow the estimateExport call to proceed with a zero limit
+        // This ensures the UI updates with the zero estimate without getting stuck in a loading state
+      }
 
       const payload = {
         type,

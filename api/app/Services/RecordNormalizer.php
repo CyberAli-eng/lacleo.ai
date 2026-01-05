@@ -6,6 +6,14 @@ class RecordNormalizer
 {
     public static function normalizeContact(array $doc): array
     {
+        // Automatically handle raw Elasticsearch results
+        if (isset($doc['_source']) && is_array($doc['_source'])) {
+            $id = $doc['_id'] ?? $doc['id'] ?? null;
+            $doc = $doc['_source'];
+            if (!isset($doc['id']))
+                $doc['id'] = $id;
+        }
+
         $id = $doc['_id'] ?? $doc['id'] ?? null;
         $domain = $doc['domain'] ?? $doc['website'] ?? data_get($doc, 'company_domain');
 
@@ -90,7 +98,7 @@ class RecordNormalizer
         // Extract work_email and personal_email from emails array if not present as flat fields
         $workEmail = $doc['work_email'] ?? null;
         $personalEmail = $doc['personal_email'] ?? null;
-        
+
         if (!$workEmail && !empty($emails)) {
             // First email with type 'work' or just first email
             foreach ($emails as $e) {
@@ -103,7 +111,7 @@ class RecordNormalizer
                 $workEmail = $emails[0]['email'] ?? null;
             }
         }
-        
+
         if (!$personalEmail && !empty($emails)) {
             // First email with type 'personal' or second email if different from work
             foreach ($emails as $e) {
@@ -120,7 +128,7 @@ class RecordNormalizer
         // Extract mobile_number and direct_number from phones array if not present as flat fields
         $mobileNumber = $doc['mobile_number'] ?? null;
         $directNumber = $doc['direct_number'] ?? null;
-        
+
         if (!$mobileNumber && !empty($phones)) {
             // First phone with type 'mobile' or just first phone
             foreach ($phones as $p) {
@@ -133,7 +141,7 @@ class RecordNormalizer
                 $mobileNumber = $phones[0]['phone_number'] ?? null;
             }
         }
-        
+
         if (!$directNumber && !empty($phones)) {
             // First phone with type 'direct' or 'work', or second phone if different from mobile
             foreach ($phones as $p) {
@@ -173,6 +181,14 @@ class RecordNormalizer
 
     public static function normalizeCompany(array $doc): array
     {
+        // Automatically handle raw Elasticsearch results
+        if (isset($doc['_source']) && is_array($doc['_source'])) {
+            $id = $doc['_id'] ?? $doc['id'] ?? null;
+            $doc = $doc['_source'];
+            if (!isset($doc['id']))
+                $doc['id'] = $id;
+        }
+
         $domain = $doc['domain'] ?? $doc['website'] ?? data_get($doc, 'company_domain');
         $name = $doc['name'] ?? $doc['company'] ?? null;
         $linkedin = $doc['linkedin_url'] ?? $doc['company_linkedin_url'] ?? null;
@@ -231,7 +247,8 @@ class RecordNormalizer
 
         $keywords = $doc['keywords'] ?? [];
         if (is_string($keywords)) {
-            $keywords = [$keywords];
+            $keywords = array_map('trim', preg_split('/[,;|]/', $keywords));
+            $keywords = array_values(array_filter($keywords));
         }
 
         // Revenue: support both annual_revenue_usd and annual_revenue (string/number)

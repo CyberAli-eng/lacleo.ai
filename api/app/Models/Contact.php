@@ -19,6 +19,7 @@ class Contact extends Model
         'location',
         'socialMedia',
         'phone_numbers',
+        'company_obj',
     ];
     protected $casts = [
         'location' => 'array',
@@ -26,6 +27,7 @@ class Contact extends Model
         'departments' => 'array',
         'emails' => 'array',
         'phone_numbers' => 'array',
+        'company_obj' => 'array',
     ];
     protected $dynamicMapSetting = 'false';
 
@@ -92,7 +94,7 @@ class Contact extends Model
     public function elasticIndex(): string
     {
         return \App\Elasticsearch\IndexResolver::contacts();
-        
+
     }
 
     public function elasticReadAlias(): string
@@ -283,9 +285,24 @@ class Contact extends Model
             'technologies_normalized' => [
                 'type' => 'keyword',
             ],
-            'company_obj.technologies_normalized' => [
-                'type' => 'keyword',
+            'company_obj' => [
+                'type' => 'object',
+                'properties' => [
+                    'industry' => ['type' => 'keyword'],
+                    'business_category' => ['type' => 'keyword'],
+                    'keywords' => ['type' => 'keyword'],
+                    'technologies_normalized' => ['type' => 'keyword'],
+                    'employee_count' => ['type' => 'long'],
+                    'annual_revenue' => ['type' => 'long'],
+                    'total_funding' => ['type' => 'long'],
+                    'founded_year' => ['type' => 'integer'],
+                    'last_raised_at' => ['type' => 'date'],
+                ]
             ],
+            // Keep this for backward compatibility or if some code uses it directly
+            'company_obj.industry' => ['type' => 'keyword'],
+            'company_obj.business_category' => ['type' => 'keyword'],
+            'company_obj.technologies_normalized' => ['type' => 'keyword'],
         ];
     }
 
@@ -396,6 +413,7 @@ class Contact extends Model
             'seniority_level' => $seniority,
             'department' => $department,
             'department_normalized' => $normalizedDepts,
+            'company_obj' => $this->company_obj,
         ];
     }
 
@@ -460,6 +478,16 @@ class Contact extends Model
             if (!empty($company['info']['is_current'])) {
                 $attributes['company'] = $company['name'];
                 $attributes['website'] = $company['domain'];
+                $attributes['company_obj'] = [
+                    'name' => $company['name'],
+                    'domain' => $company['domain'],
+                    'industry' => $company['industry'] ?? null,
+                    'business_category' => $company['business_category'] ?? null,
+                    'employees' => $company['employee_count'] ?? null,
+                    'employee_count' => $company['employee_count'] ?? null,
+                    'annual_revenue' => $company['annual_revenue'] ?? null,
+                    'keywords' => $company['keywords'] ?? [],
+                ];
                 break;
             }
         }

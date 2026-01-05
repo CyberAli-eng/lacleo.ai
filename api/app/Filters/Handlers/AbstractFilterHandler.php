@@ -18,7 +18,7 @@ abstract class AbstractFilterHandler implements FilterHandlerInterface
         return $this->filter->allows_exclusion;
     }
 
-    abstract public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array;
+    abstract public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array;
 
     /**
      * Paginate an array of results

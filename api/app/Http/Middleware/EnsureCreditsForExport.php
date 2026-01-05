@@ -40,14 +40,17 @@ class EnsureCreditsForExport
 
         $payload = $request->validate([
             'type' => 'required|in:contacts,companies',
-            'ids' => 'required|array',
+            'ids' => 'sometimes|array',
             'ids.*' => 'string',
             'sanitize' => 'sometimes|boolean',
             'limit' => 'sometimes|integer|min:1|max:' . self::MAX_CONTACTS,
             'fields' => 'sometimes|array',
             'fields.email' => 'sometimes|boolean',
             'fields.phone' => 'sometimes|boolean',
+            'filter_dsl' => 'sometimes|array',
         ]);
+
+        $payload['ids'] = $payload['ids'] ?? [];
 
         [$contactsIncluded, $emailCount, $phoneCount, $rows] = $this->computeCounts($payload['type'], $payload['ids'], $request);
         if (!empty($payload['limit'])) {
@@ -229,45 +232,97 @@ class EnsureCreditsForExport
 
             return [$contactsIncluded, $emailCount, $phoneCount, $rows];
         }
+
         if ($type === 'contacts') {
-            // If no IDs provided, fetch bulk records without filter
-            if (empty($ids)) {
-                $base = Contact::elastic();
-            } else {
-                $base = Contact::elastic()->filter(['terms' => ['_id' => $ids]]);
-            }
-            $page = 1;
-            $per = 1000;
-            $result = $base->paginate($page, $per);
-            $contactsIncluded = $result['total'] ?? count($result['data'] ?? []);
-            $emailCount = 0;
-            $phoneCount = 0;
-            $last = $result['last_page'] ?? 1;
-            while (true) {
-                foreach (($result['data'] ?? []) as $c) {
-                    $norm = \App\Services\RecordNormalizer::normalizeContact($c);
-                    // Count 1 credit per contact with at least one work email
-                    if (!empty($norm['emails'])) {
-                        foreach ($norm['emails'] as $e) {
-                            if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
-                                $emailCount++;
-                                break; // Only count once per contact
-                            }
-                        }
-                    }
-                    // Count 4 credits per contact: mobile phone (priority 1), or direct phone if no mobile (priority 2)
-                    if (!empty($norm['mobile_number'])) {
-                        $phoneCount++;
-                    } elseif (!empty($norm['direct_number'])) {
-                        $phoneCount++;
-                    }
+            $builder = Contact::elastic();
+            $filterDsl = $request->input('filter_dsl', []);
+
+            if (!empty($ids)) {
+                $builder->filter(['terms' => ['_id' => $ids]]);
+            } elseif (!empty($filterDsl)) {
+                $filterManager = app(\App\Filters\FilterManager::class);
+                if (isset($filterDsl['contact']) && is_array($filterDsl['contact'])) {
+                    $filterManager->applyFilters($builder, $filterDsl['contact'], 'contact');
                 }
-                if ($page >= $last) {
-                    break;
+                if (isset($filterDsl['company']) && is_array($filterDsl['company'])) {
+                    $filterManager->applyFilters($builder, $filterDsl['company'], 'company');
                 }
-                $page++;
-                $result = $base->paginate($page, $per);
+
+                // Fallback for flat DSL
+                if (!isset($filterDsl['contact']) && !isset($filterDsl['company'])) {
+                    $filterManager->applyFilters($builder, $filterDsl, 'contact');
+                }
             }
+
+            // Use ES aggregations for non-looping count estimation
+            $builder->aggregations([
+                'email_count' => [
+                    'filter' => [
+                        'bool' => [
+                            'should' => [
+                                [
+                                    'nested' => [
+                                        'path' => 'emails',
+                                        'query' => [
+                                            'bool' => [
+                                                'must' => [
+                                                    ['term' => ['emails.type' => 'work']],
+                                                    ['exists' => ['field' => 'emails.email']]
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                ],
+                                ['exists' => ['field' => 'work_email']],
+                                ['exists' => ['field' => 'email']],
+                                ['exists' => ['field' => 'personal_email']]
+                            ]
+                        ]
+                    ]
+                ],
+                'phone_count' => [
+                    'filter' => [
+                        'bool' => [
+                            'should' => [
+                                [
+                                    'nested' => [
+                                        'path' => 'phone_numbers',
+                                        'query' => [
+                                            'bool' => [
+                                                'must' => [
+                                                    ['exists' => ['field' => 'phone_numbers.phone_number']]
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                ],
+                                ['exists' => ['field' => 'mobile_number']],
+                                ['exists' => ['field' => 'direct_number']],
+                                ['exists' => ['field' => 'phone']],
+                                ['exists' => ['field' => 'phone_number']],
+                                ['exists' => ['field' => 'mobile_phone']],
+                                ['exists' => ['field' => 'direct_phone']]
+                            ]
+                        ]
+                    ]
+                ]
+            ]);
+
+            $result = $builder->paginate(1, 1);
+            $totalFound = $result['total'] ?? 0;
+            $limit = (int) $request->input('limit', self::MAX_CONTACTS);
+            $contactsIncluded = min($totalFound, $limit);
+
+            $emailCount = $result['aggregations']['email_count']['doc_count'] ?? 0;
+            $phoneCount = $result['aggregations']['phone_count']['doc_count'] ?? 0;
+
+            // Scale counts if limited (approximation)
+            if ($totalFound > 0 && $contactsIncluded < $totalFound) {
+                $ratio = $contactsIncluded / $totalFound;
+                $emailCount = (int) round($emailCount * $ratio);
+                $phoneCount = (int) round($phoneCount * $ratio);
+            }
+
             return [$contactsIncluded, $emailCount, $phoneCount, $contactsIncluded];
         }
 

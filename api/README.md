@@ -1,302 +1,159 @@
-# API Service - lacleo.ai
+# LaCleo AI Search API
+
+**Version:** 1.0.0 (Production Ready)  
+**Framework:** Laravel 11  
+**PHP:** 8.2+
 
 ## Overview
 
-The `api` service is the core backend for lacleo.ai, providing search, filtering, enrichment, and billing functionality for B2B contact and company data.
+The LaCleo AI API is the core engine behind the platform, powering the unified search, AI-driven filter generation, data enrichment, and billing services. It acts as the bridge between the frontend application, the Elasticsearch cluster, and various 3rd party services (OpenAI/Ollama, Stripe, LinkedIn Enrichment).
 
-## Tech Stack
+---
 
-- **Framework**: Laravel 11
-- **Authentication**: Laravel Sanctum
-- **Search Engine**: Elasticsearch 8.x
-- **Payment Processing**: Stripe
-- **Queue**: Redis
-- **Cache**: Redis
+## 🚀 Requirement Checklist
 
-## Key Features
+Ensure your production environment meets these requirements:
 
-### 1. Search & Filtering
-- Unified search across companies and contacts
-- 23 filters including technologies, funding, seniority, departments
-- Apollo-style aggregations with counts
-- Advanced DSL-based filtering
+| Component | Requirement | Notes |
+| :--- | :--- | :--- |
+| **PHP** | 8.2 or higher | Extensions: `bcmath`, `ctype`, `fileinfo`, `json`, `mbstring`, `openssl`, `pdo`, `tokenizer`, `xml`, `curl` |
+| **Database** | MySQL 8.0+ | Or MariaDB 10.3+. Connection via `DB_CONNECTION=mysql` |
+| **Search** | Elasticsearch 8.x | Authentication via username/password required for production. |
+| **Cache/Queue** | Redis 6.0+ | Preferred driver for production queues and sessions. |
+| **AI LLM** | Ollama (Self-hosted) | Requires TinyLlama or similar model loaded. |
+| **Web Server** | Nginx / Apache | Nginx recommended with PHP-FPM. |
 
-### 2. Contact Enrichment
-- Email finding and verification
-- Phone number discovery
-- LinkedIn profile enrichment
-- Company data enrichment
+---
 
-### 3. Export & Reveal
-- CSV export with credit deduction
-- Email/phone reveal functionality
-- Bulk operations support
+## ⚙️ Configuration (.env)
 
-### 4. AI-Powered Search
-- Natural language query translation
-- Automatic filter generation
-- Entity detection (company vs contact)
+Production environments **must** populate these variables.
 
-### 5. Billing & Credits
-- Stripe integration for payments
-- Credit-based usage tracking
-- Subscription management
-- Usage analytics
-
-## Project Structure
-
-```
-api/
-├── app/
-│   ├── Elasticsearch/        # ES index management
-│   ├── Filters/              # Filter system
-│   │   ├── FilterManager.php
-│   │   ├── Handlers/         # Filter type handlers
-│   │   └── DslValidator.php
-│   ├── Http/
-│   │   ├── Controllers/Api/v1/
-│   │   ├── Middleware/
-│   │   └── Traits/           # Reusable traits
-│   ├── Models/               # Eloquent models
-│   ├── Services/             # Business logic
-│   │   ├── SearchService.php
-│   │   ├── FilterRegistry.php
-│   │   ├── ContactEnrichmentService.php
-│   │   └── BillingService.php
-│   └── Jobs/                 # Queue jobs
-├── config/                   # Configuration files
-├── database/
-│   ├── migrations/
-│   └── seeders/
-├── routes/
-│   └── api.php              # API routes
-└── tests/                   # Test suite
-```
-
-## Environment Variables
-
-### Required
-
+### Admin Access (New!)
+The specific google accounts that have "super admin" privileges (e.g. granting free credits).
 ```env
-# Application
-APP_NAME=lacleo.ai
+ADMIN_EMAILS=admin@lacleo.ai,shaizqurashi12345@gmail.com
+```
+
+### AI Search Configuration
+```env
+# Point to your internal Ollama instance or OpenAI API
+AI_SERVICE_DRIVER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_CHAT_MODEL=tinyllama
+```
+
+### Core Services
+```env
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://api.lacleo.test
+APP_URL=https://api.lacleo.ai
 
-# Database
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=lacleo_api
-DB_USERNAME=root
-DB_PASSWORD=
+DB_DATABASE=lacleo_prod
+DB_USERNAME=forge
+DB_PASSWORD=secret
 
-# Elasticsearch
 ELASTICSEARCH_HOST=localhost:9200
 ELASTICSEARCH_USERNAME=elastic
-ELASTICSEARCH_PASSWORD=
-ELASTICSEARCH_PREFIX=stage_lacleo
-ELASTIC_COMPANY_INDEX=company
-ELASTIC_CONTACT_INDEX=contact
+ELASTICSEARCH_PASSWORD=changeme
+ELASTIC_COMPANY_INDEX=production_companies_v1
+ELASTIC_CONTACT_INDEX=production_contacts_v1
 
-# Redis
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-
-# Stripe
-STRIPE_KEY=sk_test_...
-STRIPE_SECRET=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-
-# Sanctum
-SANCTUM_STATEFUL_DOMAINS=local-app.lacleo.test,local-accounts.lacleo.test
-SESSION_DOMAIN=.lacleo.test
-
-# CORS
-CORS_ALLOWED_ORIGINS=https://local-app.lacleo.test,https://local-accounts.lacleo.test
+# Security & CORS (Critical for Auth)
+SANCTUM_STATEFUL_DOMAINS=app.lacleo.ai
+SESSION_DOMAIN=.lacleo.ai
+CORS_ALLOWED_ORIGINS=https://app.lacleo.ai,https://accounts.lacleo.ai
 ```
 
-### Optional
+---
 
-```env
-# Logging
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
+## 🛠️ Installation & Deployment
 
-# Queue
-QUEUE_CONNECTION=redis
-
-# Cache
-CACHE_DRIVER=redis
-
-# Session
-SESSION_DRIVER=redis
-SESSION_LIFETIME=120
-```
-
-## Installation
-
+### 1. Initial Setup
 ```bash
 # Install dependencies
-composer install
+composer install --optimize-autoloader --no-dev
 
-# Copy environment file
-cp .env.example .env
-
-# Generate application key
+# Generate encryption key
 php artisan key:generate
 
-# Run migrations
-php artisan migrate
-
-# Seed database (optional)
-php artisan db:seed
-
-# Clear caches
-php artisan cache:clear
-php artisan config:clear
-php artisan route:clear
+# Storage linking & permissions
+php artisan storage:link
+chmod -R 775 storage bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache
 ```
 
-## Development
-
+### 2. Database & Search Indexing
 ```bash
-# Start development server
-php artisan serve --host=local-api.lacleo.test --port=8000
+# Run database migrations
+php artisan migrate --force
 
-# Run queue worker
-php artisan queue:work
-
-# Run tests
-php artisan test
-
-# Code formatting
-./vendor/bin/php-cs-fixer fix
+# Seed database with initial meta-data (Filters, Plans, etc.)
+php artisan db:seed --force
 ```
 
-## API Endpoints
-
-### Search
-- `POST /api/v1/search` - Unified search
-- `GET /api/v1/filters` - List available filters
-- `GET /api/v1/filters/{filter}/values` - Get filter values
-
-### Enrichment
-- `POST /api/v1/enrich/contact` - Enrich contact data
-- `GET /api/v1/enrich/{requestId}` - Check enrichment status
-
-### Export
-- `POST /api/v1/export/preview` - Preview export
-- `POST /api/v1/export` - Create export job
-- `GET /api/v1/export/{requestId}/download` - Download export
-
-### Billing
-- `GET /api/v1/billing/usage` - Get credit usage
-- `POST /api/v1/billing/purchase` - Purchase credits
-- `POST /api/v1/billing/subscribe` - Create subscription
-
-### AI Search
-- `POST /api/v1/ai/translate` - Translate natural language query
-
-## Filter System
-
-The filter system is the core of the search functionality:
-
-### Available Filters (23 total)
-
-**Company Filters**:
-- company_name, company_domain, business_category
-- keywords, technologies (comma-separated)
-- employee_count, annual_revenue, founded_year (ranges)
-- total_funding (range), has_funding (boolean)
-- countries, states, cities
-
-**Contact Filters**:
-- first_name, last_name, full_name
-- job_title, seniority, departments
-- contact_country
-- work_email_exists, mobile_number_exists, direct_number_exists
-
-### Filter Configuration
-
-Filters are defined in `app/Services/FilterRegistry.php` with:
-- Field mappings to Elasticsearch
-- Input types (text, multi_select, range, toggle)
-- Aggregation settings
-- Preloaded values (for seniority, departments)
-
-## Testing
-
+### 3. Production Optimizations (Run on every deploy)
 ```bash
-# Run all tests
-php artisan test
+# Optimize Configuration Loading
+php artisan config:cache
 
-# Run specific test suite
-php artisan test --testsuite=Feature
+# Optimize Route Loading
+php artisan route:cache
 
-# Run with coverage
-php artisan test --coverage
-
-# Test specific filter
-php scripts/adhoc/test_specific_filters.php
+# Optimize View Loading
+php artisan view:cache
 ```
 
-## Troubleshooting
+### 4. Queue Workers
+The API relies on background workers for `Export CSV` and `Enrichment` tasks.
+Use **Supervisor** to keep this running:
+```conf
+[program:lacleo-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /path/to/api/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=forge
+numprocs=2
+redirect_stderr=true
+stdout_logfile=/path/to/api/storage/logs/worker.log
+```
 
-### Elasticsearch Connection Issues
+---
+
+## 🔍 Admin & Debugging Commands
+
+The codebase includes several utility scripts and commands for debugging production issues.
+
+### Search Debugging
+If search results look wrong, verify the Elasticsearch connection and mapping:
 ```bash
-# Check ES status
-curl -X GET "localhost:9200/_cluster/health?pretty"
-
-# Verify indexes
-curl -X GET "localhost:9200/_cat/indices?v"
+# Check raw interaction with specifically 'contacts' index
+php scripts/adhoc/debug_searchability.php
 ```
 
-### Cache Issues
+### Testing Admin Configuration
+Verify the `ADMIN_EMAILS` setting is correctly loaded:
 ```bash
-# Clear all caches
-php artisan cache:clear
-php artisan config:clear
-php artisan route:clear
-php artisan view:clear
+php scripts/adhoc/test_admin_env.php
 ```
 
-### Queue Issues
+### Force Re-index (Careful!)
+If you need to completely rebuild the search index from SQL:
 ```bash
-# Restart queue workers
-php artisan queue:restart
-
-# Check failed jobs
-php artisan queue:failed
-
-# Retry failed jobs
-php artisan queue:retry all
+# CAUTION: High Load Operation
+php artisan scout:import "App\Models\Contact"
+php artisan scout:import "App\Models\Company"
 ```
 
-## Security
+---
 
-- All routes require Sanctum authentication (except webhooks)
-- CSRF protection enabled for stateful requests
-- PII sanitization in logs via `SanitizesPII` trait
-- Rate limiting on API endpoints
-- Stripe webhook signature verification
+## 🛡️ Security Best Practices
 
-## Performance
-
-- Redis caching for search results (60s for public queries)
-- Elasticsearch query optimization
-- Pagination limits (max 100 per page, max depth 10,000)
-- Queue processing for heavy operations
-
-## Contributing
-
-1. Follow PSR-12 coding standards
-2. Write tests for new features
-3. Update documentation
-4. Run code formatter before committing
-
-## License
-
-Proprietary - All rights reserved
+1.  **PII Handling**: The `SanitizesPII` trait is applied to logging to prevent emails/phones from leaking into logs.
+2.  **CORS**: Ensure `CORS_ALLOWED_ORIGINS` strictly matches your frontend URLs.
+3.  **Sanctum**: `SESSION_DOMAIN` must match the cookie domain (e.g., `.lacleo.ai`) for cross-subdomain auth to work.

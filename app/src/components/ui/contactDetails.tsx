@@ -228,9 +228,9 @@ const ContactDetails = () => {
   // Funding data
   const totalFundingUsd = formatRevenue(
     (currentCompany as { total_funding_usd?: unknown })?.total_funding_usd ??
-      (currentCompany as { total_funding?: unknown })?.total_funding ??
-      (currentCompany as { funding?: { total_funding?: unknown } })?.funding?.total_funding ??
-      null
+    (currentCompany as { total_funding?: unknown })?.total_funding ??
+    (currentCompany as { funding?: { total_funding?: unknown } })?.funding?.total_funding ??
+    null
   )
   const latestFunding =
     (currentCompany as { latest_funding?: string | null })?.latest_funding ??
@@ -238,9 +238,9 @@ const ContactDetails = () => {
     null
   const latestFundingAmount = formatRevenue(
     (currentCompany as { latest_funding_amount?: unknown })?.latest_funding_amount ??
-      (currentCompany as { latest_funding_usd?: unknown })?.latest_funding_usd ??
-      (currentCompany as { funding?: { latest_funding_amount?: unknown } })?.funding?.latest_funding_amount ??
-      null
+    (currentCompany as { latest_funding_usd?: unknown })?.latest_funding_usd ??
+    (currentCompany as { funding?: { latest_funding_amount?: unknown } })?.funding?.latest_funding_amount ??
+    null
   )
   const lastRaisedAtRaw =
     (currentCompany as { last_raised_at?: string | null })?.last_raised_at ??
@@ -304,18 +304,17 @@ const ContactDetails = () => {
         showAlert("Information unavailable", `No ${fieldType} available to reveal`, "warning", 4000)
       }
     } catch (error: unknown) {
-      // Only handle insufficient credits for phone reveals
-      if (fieldType === "phone") {
-        const status = (error as { status?: number })?.status
-        const dataError =
-          typeof error === "object" && error !== null && "data" in (error as Record<string, unknown>)
-            ? (error as { data?: { error?: string } }).data?.error || null
-            : null
-        if (status === 402 || dataError === "INSUFFICIENT_CREDITS") {
-          dispatch(setCreditUsageOpen(true))
-          return
-        }
+      const status = (error as { status?: number })?.status
+      const dataError =
+        typeof error === "object" && error !== null && "data" in (error as Record<string, unknown>)
+          ? (error as { data?: { error?: string } }).data?.error || null
+          : null
+
+      if (status === 402 || dataError === "INSUFFICIENT_CREDITS") {
+        dispatch(setCreditUsageOpen(true))
+        return
       }
+
       showAlert("Reveal failed", "Please try again later", "error", 5000)
     }
   }
@@ -380,8 +379,15 @@ const ContactDetails = () => {
           if (res.contact.email) updatedContact.email = res.contact.email
           setEnhancedContact(updatedContact)
         }
-      } catch (_error: unknown) {
-        void 0
+      } catch (error: unknown) {
+        const status = (error as { status?: number })?.status
+        const dataError =
+          typeof error === "object" && error !== null && "data" in (error as Record<string, unknown>)
+            ? (error as { data?: { error?: string } }).data?.error || null
+            : null
+        if (status === 402 || dataError === "INSUFFICIENT_CREDITS") {
+          dispatch(setCreditUsageOpen(true))
+        }
       }
     }
 

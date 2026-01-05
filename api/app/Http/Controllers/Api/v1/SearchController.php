@@ -134,7 +134,8 @@ class SearchController extends Controller
                 $requestQuery['q'] ?? null,
                 $requestQuery['page'] ?? 1,
                 $requestQuery['count'] ?? 10,
-                $context
+                $context,
+                $requestQuery['search_type'] ?? null
             );
 
             if (config('app.debug')) {
@@ -334,6 +335,7 @@ class SearchController extends Controller
             'level' => 'nullable|string',
             'parents' => 'array',
             'filter_dsl' => 'sometimes|nullable',
+            'search_type' => 'sometimes|nullable|string|in:contact,company',
         ]);
     }
 

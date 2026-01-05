@@ -28,7 +28,7 @@ import { useCompanyLogoQuery } from "./slice/apiSlice"
 import { CompanyAttributes } from "@/interface/searchTable/search"
 import { openContactInfoForContact } from "./slice/contactInfoSlice"
 import { useDebounce } from "@/app/hooks/useDebounce"
-import { selectSearchResults, selectSearchStatus, selectSearchMeta, setSort, executeSearch, setPage } from "@/features/searchExecution/slice/searchExecutionSlice"
+import { selectSearchResults, selectSearchStatus, selectSearchMeta, setSort, executeSearch, setPage, setSearchTerm } from "@/features/searchExecution/slice/searchExecutionSlice"
 
 const ContactCompanyCell = ({ row }: { row: ContactAttributes }) => {
   const normalizedDomain = (row.website || "")
@@ -355,6 +355,10 @@ export function ContactsTable() {
             sortSelected={sortSelected}
             searchPlaceholder="Search contacts..."
             onSearch={handleSearchChange}
+            onSearchExecute={() => {
+              dispatch(setPage(1))
+              dispatch(executeSearch())
+            }}
             searchValue={queryValue}
             showCheckbox={true}
             selectedItems={selectedContacts}

@@ -31,7 +31,7 @@ class ExportController extends Controller
     {
         $validated = $request->validate([
             'type' => 'required|in:contacts,companies',
-            'ids' => 'required|array',
+            'ids' => 'sometimes|array',
             'ids.*' => 'string',
             'sanitize' => 'sometimes|boolean',
             'limit' => 'sometimes|integer|min:1|max:' . self::EXPORT_PAGE_SIZE(),
@@ -40,6 +40,8 @@ class ExportController extends Controller
             'fields.phone' => 'sometimes|boolean',
             'filter_dsl' => 'sometimes|array',
         ]);
+
+        $validated['ids'] = $validated['ids'] ?? [];
 
         $emailCount = 0;
         $phoneCount = 0;
@@ -82,60 +84,72 @@ class ExportController extends Controller
                         $base = Contact::elastic()->index((new Contact())->elasticReadAlias())->filter(['terms' => ['_id' => $decodedIds]]);
                     }
 
-                    if (!empty($validated['limit'])) {
-                        $data = $base->paginate(1, (int) $validated['limit'])['data'] ?? [];
-                        Log::info('ExportController preview - contacts fetched', ['count' => count($data), 'limit' => $validated['limit']]);
-                        $contactsIncluded = count($data);
-                        foreach ($data as $c) {
-                            $source = $c['_source'] ?? $c;
-                            Log::info('Contact source structure', ['has_emails' => isset($source['emails']), 'has_phones' => isset($source['phone_numbers'])]);
-                            $norm = RecordNormalizer::normalizeContact($source);
-                            Log::info('Normalized contact data', ['emails_count' => count($norm['emails'] ?? []), 'phones_count' => count($norm['phones'] ?? []), 'emails' => $norm['emails'] ?? [], 'phones' => $norm['phones'] ?? []]);
-                            // Count work emails (1 credit each, max 1 per contact)
-                            if (!empty($norm['emails'])) {
-                                foreach ($norm['emails'] as $e) {
-                                    if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
-                                        $emailCount++;
-                                        break;
-                                    }
-                                }
-                            }
-                            // Count phones (4 credits each)
-                            if (!empty($norm['phones'])) {
-                                $phoneCount++;
-                            }
-                        }
-                    } else {
-                        $page = 1;
-                        $per = 1000;
-                        $result = $base->paginate($page, $per);
-                        $contactsIncluded = $result['total'] ?? count($result['data'] ?? []);
-                        $last = $result['last_page'] ?? 1;
-                        while (true) {
-                            $data = $result['data'] ?? [];
-                            foreach ($data as $c) {
-                                $source = $c['_source'] ?? $c;
-                                $norm = RecordNormalizer::normalizeContact($source);
-                                // Count work emails (1 credit each, max 1 per contact)
-                                if (!empty($norm['emails'])) {
-                                    foreach ($norm['emails'] as $e) {
-                                        if (isset($e['type']) && $e['type'] === 'work' && !empty($e['email'])) {
-                                            $emailCount++;
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Count phones (4 credits each)
-                                if (!empty($norm['phones'])) {
-                                    $phoneCount++;
-                                }
-                            }
-                            if ($page >= $last) {
-                                break;
-                            }
-                            $page++;
-                            $result = $base->paginate($page, $per);
-                        }
+                    $totalFound = $base->paginate(1, 1)['total'] ?? 0;
+                    $limit = (int) ($validated['limit'] ?? self::EXPORT_PAGE_SIZE());
+                    $contactsIncluded = min($totalFound, $limit);
+
+                    $base->aggregations([
+                        'email_count' => [
+                            'filter' => [
+                                'bool' => [
+                                    'should' => [
+                                        [
+                                            'nested' => [
+                                                'path' => 'emails',
+                                                'query' => [
+                                                    'bool' => [
+                                                        'must' => [
+                                                            ['term' => ['emails.type' => 'work']],
+                                                            ['exists' => ['field' => 'emails.email']]
+                                                        ]
+                                                    ]
+                                                ]
+                                            ]
+                                        ],
+                                        ['exists' => ['field' => 'work_email']],
+                                        ['exists' => ['field' => 'email']],
+                                        ['exists' => ['field' => 'personal_email']]
+                                    ]
+                                ]
+                            ]
+                        ],
+                        'phone_count' => [
+                            'filter' => [
+                                'bool' => [
+                                    'should' => [
+                                        [
+                                            'nested' => [
+                                                'path' => 'phone_numbers',
+                                                'query' => [
+                                                    'bool' => [
+                                                        'must' => [
+                                                            ['exists' => ['field' => 'phone_numbers.phone_number']]
+                                                        ]
+                                                    ]
+                                                ]
+                                            ]
+                                        ],
+                                        ['exists' => ['field' => 'mobile_number']],
+                                        ['exists' => ['field' => 'direct_number']],
+                                        ['exists' => ['field' => 'phone']],
+                                        ['exists' => ['field' => 'phone_number']],
+                                        ['exists' => ['field' => 'mobile_phone']],
+                                        ['exists' => ['field' => 'direct_phone']]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]);
+
+                    $aggResult = $base->paginate(1, 1);
+                    $emailCount = (int) ($aggResult['aggregations']['email_count']['doc_count'] ?? 0);
+                    $phoneCount = (int) ($aggResult['aggregations']['phone_count']['doc_count'] ?? 0);
+
+                    // Scale counts if limited (approximation)
+                    if ($totalFound > 0 && $contactsIncluded < $totalFound) {
+                        $ratio = $contactsIncluded / $totalFound;
+                        $emailCount = (int) round($emailCount * $ratio);
+                        $phoneCount = (int) round($phoneCount * $ratio);
                     }
                 } else {
                     // For companies: decode IDs, fetch companies directly, no cross-checking, no credits
@@ -267,14 +281,17 @@ class ExportController extends Controller
 
             $validated = $request->validate([
                 'type' => 'required|in:contacts,companies',
-                'ids' => 'required|array',
+                'ids' => 'sometimes|array',
                 'ids.*' => 'string',
                 'sanitize' => 'sometimes|boolean',
                 'limit' => 'sometimes|integer|min:1|max:' . self::EXPORT_PAGE_SIZE(),
                 'fields' => 'sometimes|array',
                 'fields.email' => 'sometimes|boolean',
                 'fields.phone' => 'sometimes|boolean',
+                'filter_dsl' => 'sometimes|array',
             ]);
+
+            $validated['ids'] = $validated['ids'] ?? [];
 
             Log::info('ExportController export - VALIDATED', [
                 'type' => $validated['type'],

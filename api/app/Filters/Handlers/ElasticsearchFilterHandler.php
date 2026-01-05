@@ -46,20 +46,27 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
     /**
      * Get possible values for this filter
      */
-    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
+    public function getValues(?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array
     {
-        $targetModel = $this->filter->getTargetModelOrFail();
+        $appliesTo = $searchType ?: ($this->filter->applies_to[0] ?? 'company');
+        $targetModel = $appliesTo === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
         $elastic = $targetModel::elastic();
 
         $settings = $this->filter->settings;
         $fieldType = $this->filter->type ?? ($settings['field_type'] ?? 'text');
 
         // Determine field based on target model context
-        $context = ($targetModel === \App\Models\Contact::class) ? 'contact' : 'company';
-        $field = $this->getField($context);
+        $entityContext = $appliesTo;
+        $field = $this->getField($entityContext);
 
         if (empty($field)) {
             return $this->emptyPaginatedResponse($page, $perPage);
+        }
+
+        // Apply active filters (drill-down) if context is provided
+        if (!empty($context)) {
+            $fm = app(\App\Filters\FilterManager::class);
+            $fm->applyFilters($elastic, $context, $entityContext);
         }
 
         // For suggestions, we want to filter the TERMS, not just the documents.
@@ -141,6 +148,7 @@ class ElasticsearchFilterHandler extends AbstractFilterHandler
             ->map(fn($bucket) => [
                 'id' => $bucket['key'],
                 'name' => $bucket['key'],
+                'count' => $bucket['doc_count'] ?? 0,
             ])
             ->values()
             ->toArray();

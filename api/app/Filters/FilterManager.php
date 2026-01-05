@@ -191,7 +191,7 @@ class FilterManager
     /**
      * Get values for a specific filter
      */
-    public function getFilterValues(string $filterId, ?string $search = null, int $page = 1, int $perPage = 10, array $context = []): array
+    public function getFilterValues(?string $filterId, ?string $search = null, int $page = 1, int $perPage = 10, array $context = [], ?string $searchType = null): array
     {
         // Alias common mismatched IDs
         $aliases = [
@@ -221,7 +221,7 @@ class FilterManager
             $counts = [];
             if (isset($filterConfig['aggregation']['enabled']) && $filterConfig['aggregation']['enabled']) {
                 try {
-                    $counts = $this->getAggregationCounts($filter, $filterConfig, $context);
+                    $counts = $this->getAggregationCounts($filter, $filterConfig, $context, $searchType);
                 } catch (\Throwable $e) {
                     \Log::warning('Failed to get aggregation counts for filter', [
                         'filter_id' => $filter->filter_id,
@@ -255,7 +255,7 @@ class FilterManager
 
         // Don't cache if searching or if context (active filters) is provided
         if ($search || !empty($context)) {
-            return $handler->getValues($search, $page, $perPage, $context);
+            return $handler->getValues($search, $page, $perPage, $context, $searchType);
         }
 
         // Get cache key and TTL based on filter type
@@ -271,10 +271,11 @@ class FilterManager
     /**
      * Get aggregation counts for filter values
      */
-    protected function getAggregationCounts(Filter $filter, array $filterConfig, array $context = []): array
+    protected function getAggregationCounts(Filter $filter, array $filterConfig, array $context = [], ?string $searchType = null): array
     {
-        $targetModel = $filterConfig['applies_to'][0] === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
-        $fields = $filterConfig['fields'][$filterConfig['applies_to'][0]] ?? [];
+        $appliesTo = $searchType ?: ($filterConfig['applies_to'][0] ?? 'company');
+        $targetModel = $appliesTo === 'contact' ? \App\Models\Contact::class : \App\Models\Company::class;
+        $fields = $filterConfig['fields'][$appliesTo] ?? $filterConfig['fields']['company'] ?? [];
 
         if (empty($fields)) {
             return [];
@@ -323,21 +324,48 @@ class FilterManager
                 $this->applyFilters($queryBuilder, $companyContext, 'company');
             }
 
-            $query = [
-                'query' => $queryBuilder->toArray()['query'] ?? ['match_all' => (object) []],
-                'size' => 0,
-                'aggs' => [
-                    'values' => [
-                        'terms' => [
-                            'field' => $aggField,
-                            'size' => $aggSize,
-                        ],
+            $nestedPath = null;
+            $nestedPaths = ['emails', 'phone_numbers', 'company_obj.emails', 'company_obj.phone_numbers'];
+            foreach ($nestedPaths as $path) {
+                if ($aggField === $path || str_starts_with($aggField, $path . '.')) {
+                    $nestedPath = $path;
+                    break;
+                }
+            }
+
+            $aggs = [
+                'values' => [
+                    'terms' => [
+                        'field' => $aggField,
+                        'size' => $aggSize,
                     ],
                 ],
             ];
 
+            if ($nestedPath) {
+                $query = [
+                    'query' => $queryBuilder->toArray()['query'] ?? ['match_all' => (object) []],
+                    'size' => 0,
+                    'aggs' => [
+                        'nested_values' => [
+                            'nested' => ['path' => $nestedPath],
+                            'aggs' => $aggs
+                        ]
+                    ]
+                ];
+            } else {
+                $query = [
+                    'query' => $queryBuilder->toArray()['query'] ?? ['match_all' => (object) []],
+                    'size' => 0,
+                    'aggs' => $aggs
+                ];
+            }
+
             $result = $targetModel::searchInElastic($query);
-            $buckets = $result['aggregations']['values']['buckets'] ?? [];
+
+            $buckets = $nestedPath
+                ? ($result['aggregations']['nested_values']['values']['buckets'] ?? [])
+                : ($result['aggregations']['values']['buckets'] ?? []);
 
             $counts = [];
             foreach ($buckets as $bucket) {
