@@ -66,6 +66,7 @@ class FilterManager
                 'supports_value_lookup' => in_array($config['data_source'], ['elasticsearch', 'predefined']),
                 'filter_type' => $config['type'],
                 'range' => $config['range'] ?? null,
+                'hint' => $config['hint'] ?? null,
             ];
 
             $filter = new Filter($attributes);
