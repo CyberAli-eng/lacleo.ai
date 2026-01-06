@@ -13,7 +13,7 @@ class FilterRegistrySeeder extends Seeder
      */
     public function run(): void
     {
-        $filters = HardcodedRegistry::getFilters();
+        $filters = HardcodedRegistry::defaultFilters();
 
         foreach ($filters as $filter) {
             FilterRegistry::updateOrCreate(
