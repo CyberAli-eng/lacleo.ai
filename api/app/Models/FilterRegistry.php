@@ -25,6 +25,7 @@ class FilterRegistry extends Model
         'preloaded_values',
         'range_config',
         'additional_settings',
+        'hint',
         'sort_order',
         'is_active',
     ];

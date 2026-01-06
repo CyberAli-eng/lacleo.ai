@@ -28,6 +28,7 @@ class FilterRegistry
                         'aggregation' => $filter->aggregation_config,
                         'preloaded_values' => $filter->preloaded_values,
                         'range' => $filter->range_config,
+                        'hint' => $filter->hint,
                         'sort_order' => $filter->sort_order,
                         'active' => $filter->is_active,
                     ];
@@ -395,6 +396,7 @@ class FilterRegistry
                 ],
                 'search' => ['enabled' => true, 'suggest_fields' => ['title']],
                 'filtering' => ['mode' => 'match', 'supports_exclusion' => true],
+                'hint' => 'Tip: Use "quotation marks" for absolute match',
                 'sort_order' => 220,
                 'active' => true,
             ],

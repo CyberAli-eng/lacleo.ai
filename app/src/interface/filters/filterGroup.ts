@@ -8,6 +8,7 @@ export type IFilter = {
   input_type: "text" | "select" | "multi_select" | "toggle" | "range" | "hierarchical" | "checkbox_list"
   type?: string // Underlying data type from registry (e.g. 'date', 'text', 'keyword')
   preloaded_values?: Array<{ id: string; name: string; count: number | null }>
+  hint?: string
 }
 
 export type IFilterGroup = {

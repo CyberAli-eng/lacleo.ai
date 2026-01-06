@@ -344,35 +344,34 @@ export const Filters = () => {
                                 <button type="submit">
                                   <CheckCircle className="absolute right-3 top-2.5 size-4 cursor-pointer text-green-400 dark:text-green-500" />
                                 </button>
-                                {filter.id === "job_title" && (
-                                  <p className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">
-                                    Tip: Use <span className="font-medium text-gray-500 text-[11px] dark:text-gray-400">"quotation marks"</span> for absolute match
-                                  </p>
-                                )}
+                                {filter.hint && <p className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">{filter.hint}</p>}
                               </form>
                             ) : filter.is_searchable ? (
-                              <div className="relative">
-                                <Search className="absolute left-3 top-2.5 size-4 text-gray-400 dark:text-gray-500" />
-                                <input
-                                  type="text"
-                                  className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 text-sm text-gray-900 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-700"
-                                  placeholder={`Search ${filter.name.toLowerCase()}`}
-                                  value={searchTerms[filter.id] || ""}
-                                  onChange={(e) => handleSearchChange(filter, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault()
-                                      const val = searchTerms[filter.id]
-                                      if (val && val.trim()) {
-                                        const newItem = { id: val, name: val, type: "include" } as const
-                                        dispatch(addSelectedItem({ sectionId: filter.id, item: newItem }))
+                              <div className="space-y-1.5">
+                                <div className="relative">
+                                  <Search className="absolute left-3 top-2.5 size-4 text-gray-400 dark:text-gray-500" />
+                                  <input
+                                    type="text"
+                                    className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 text-sm text-gray-900 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-700"
+                                    placeholder={`Search ${filter.name.toLowerCase()}`}
+                                    value={searchTerms[filter.id] || ""}
+                                    onChange={(e) => handleSearchChange(filter, e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault()
+                                        const val = searchTerms[filter.id]
+                                        if (val && val.trim()) {
+                                          const newItem = { id: val, name: val, type: "include" } as const
+                                          dispatch(addSelectedItem({ sectionId: filter.id, item: newItem }))
 
-                                        dispatch(setSearchTerm({ sectionId: filter.id, term: "" }))
-                                        executeImmediateSearch()
+                                          dispatch(setSearchTerm({ sectionId: filter.id, term: "" }))
+                                          executeImmediateSearch()
+                                        }
                                       }
-                                    }
-                                  }}
-                                />
+                                    }}
+                                  />
+                                </div>
+                                {filter.hint && <p className="text-[10px] text-gray-400 dark:text-gray-500">{filter.hint}</p>}
                               </div>
                             ) : null}
 
@@ -574,7 +573,8 @@ export const Filters = () => {
                 })}
             </Card>
           </div>
-        ))}
+        ))
+        }
       </Card>
 
       <div className="mt-4 px-2">

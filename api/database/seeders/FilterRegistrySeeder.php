@@ -31,6 +31,7 @@ class FilterRegistrySeeder extends Seeder
                     'aggregation_config' => $filter['aggregation'] ?? null,
                     'preloaded_values' => $filter['preloaded_values'] ?? null,
                     'range_config' => $filter['range'] ?? null,
+                    'hint' => $filter['hint'] ?? null,
                     'sort_order' => $filter['sort_order'] ?? 0,
                     'is_active' => $filter['active'] ?? true,
                 ]
