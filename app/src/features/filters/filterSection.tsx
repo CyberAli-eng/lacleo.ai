@@ -344,6 +344,11 @@ export const Filters = () => {
                                 <button type="submit">
                                   <CheckCircle className="absolute right-3 top-2.5 size-4 cursor-pointer text-green-400 dark:text-green-500" />
                                 </button>
+                                {filter.id === "job_title" && (
+                                  <p className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+                                    Tip: Use <span className="font-medium text-gray-500 text-[11px] dark:text-gray-400">"quotation marks"</span> for absolute match
+                                  </p>
+                                )}
                               </form>
                             ) : filter.is_searchable ? (
                               <div className="relative">

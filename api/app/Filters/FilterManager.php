@@ -264,7 +264,7 @@ class FilterManager
 
         // Cache values if needed
         return Cache::remember($cacheKey, $cacheTTL, function () use ($handler, $page, $perPage) {
-            return $handler->getValues(null, $page, $perPage);
+            return $handler->getValues(null, $page, $perPage, [], null);
         });
     }
 
