@@ -57,13 +57,6 @@ class ContactEnrichmentService
      */
     public function createPrimeRoleContact(array $requestData): array
     {
-        if (config('app.debug')) {
-            Log::debug('Creating PrimeRole contact', [
-                'transaction_id' => $requestData['transaction_id'] ?? null,
-                'contact_data' => $requestData['contact'] ?? null,
-                'company_data' => $requestData['company'] ?? null,
-            ]);
-        }
 
         $contactData = $requestData['contact'];
         $companyData = $requestData['company'] ?? null;
@@ -85,9 +78,6 @@ class ContactEnrichmentService
             ],
         ];
 
-        if (config('app.debug')) {
-            Log::debug('Enrichment payload', ['payload' => $payload]);
-        }
 
         try {
             $response = Http::withToken($this->primeroleApiAuthToken)
@@ -97,12 +87,6 @@ class ContactEnrichmentService
                 ->post("{$this->primeroleBaseUrl}/contacts", $payload);
 
             if ($response->successful()) {
-                if (config('app.debug')) {
-                    Log::debug('Successfully created PrimeRole contact', [
-                        'transaction_id' => $requestData['transaction_id'] ?? null,
-                        'status_code' => $response->status(),
-                    ]);
-                }
 
                 return [
                     'success' => true,
@@ -136,9 +120,6 @@ class ContactEnrichmentService
      */
     public function startEnrichment(string $contactId): array
     {
-        if (config('app.debug')) {
-            Log::debug('Starting enrichment process', ['contact_id' => $contactId]);
-        }
 
         $payload = [
             'records' => [
@@ -158,12 +139,6 @@ class ContactEnrichmentService
                 ->post("{$this->primeroleBaseUrl}/enrich", $payload);
 
             if ($response->successful()) {
-                if (config('app.debug')) {
-                    Log::debug('Successfully started enrichment', [
-                        'contact_id' => $contactId,
-                        'status_code' => $response->status(),
-                    ]);
-                }
 
                 return [
                     'success' => true,
@@ -198,9 +173,6 @@ class ContactEnrichmentService
      */
     public function checkEnrichmentStatus(string $contactId): array
     {
-        if (config('app.debug')) {
-            Log::debug('Checking enrichment status', ['contact_id' => $contactId]);
-        }
 
         try {
             $response = Http::withToken($this->primeroleApiAuthToken)
@@ -208,12 +180,6 @@ class ContactEnrichmentService
                 ->get("{$this->primeroleBaseUrl}/contacts/{$contactId}");
 
             if ($response->successful()) {
-                if (config('app.debug')) {
-                    Log::debug('Successfully checked enrichment status', [
-                        'contact_id' => $contactId,
-                        'status_code' => $response->status(),
-                    ]);
-                }
 
                 return [
                     'success' => true,

@@ -28,7 +28,6 @@ const checkUserStatus = async () => {
     try {
         const token = getBearerToken();
         if (!token) {
-            console.log('Access Token not found. Redirecting to login...');
             logout();
             return;
         }
@@ -41,13 +40,11 @@ const checkUserStatus = async () => {
 
         // If the response is successful, show "Please wait..." and redirect
         isLoading.value = true; // Set loading state to true to show the "Please wait..." message
-        console.log('Redirecting to App...');
 
         // Redirect after a short delay to give the user a chance to see the message
         window.location.href = webAppUrl;
     } catch (error) {
         if (error.response && error.response.status !== 200) {
-            console.log('Logging out...');
             logout();
         } else {
             console.error('An error occurred:', error.message);

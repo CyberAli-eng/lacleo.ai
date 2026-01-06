@@ -100,11 +100,6 @@ class SearchController extends Controller
      */
     public function getFilterValues(Request $request): JsonResponse
     {
-        if (config('app.debug')) {
-            Log::debug('Filter values request received', [
-                'query_parameters' => $request->query(),
-            ]);
-        }
 
         $validator = $this->validateFilterValuesRequest($request);
 
@@ -138,12 +133,6 @@ class SearchController extends Controller
                 $requestQuery['search_type'] ?? null
             );
 
-            if (config('app.debug')) {
-                Log::debug('Filter values retrieved successfully', [
-                    'filter' => $requestQuery['filter'],
-                    'count' => count($values['data'] ?? []),
-                ]);
-            }
 
             return response()->json($values);
         } catch (Exception $e) {
@@ -178,13 +167,6 @@ class SearchController extends Controller
      */
     private function prepareSearchParameters(Request $request): array
     {
-        if (config('app.debug')) {
-            Log::debug('=== SEARCH REQUEST DEBUG START ===', [
-                'query_string' => $request->getQueryString(),
-                'full_request' => $request->all(),
-                'route_type' => $request->route('type'),
-            ]);
-        }
 
         $searchParams = SearchUrlParser::parseQuery($request->getQueryString());
         $searchParams['type'] = $request->route('type', 'company');
@@ -238,9 +220,6 @@ class SearchController extends Controller
 
         try {
             $this->searchQueryValidator->validate($searchParams);
-            if (config('app.debug')) {
-                Log::debug('Validation passed');
-            }
         } catch (QueryValidationException $e) {
             Log::error('Validation failed', [
                 'errors' => $e->getErrors(),
@@ -249,9 +228,6 @@ class SearchController extends Controller
             throw $e;
         }
 
-        if (config('app.debug')) {
-            Log::debug('=== SEARCH REQUEST DEBUG END ===');
-        }
 
         return $searchParams;
     }
@@ -309,6 +285,7 @@ class SearchController extends Controller
                     'aggregation' => $config['aggregation'] ?? ['enabled' => false],
                     'range' => $config['range'] ?? null,
                     'preloaded_values' => $config['preloaded_values'] ?? null,
+                    'hint' => $filter->hint ?? null,
                     // Maintain UI compatibility for filter_type without heuristics
                     'filter_type' => (function () use ($config) {
                         $applies = $config['applies_to'] ?? [];

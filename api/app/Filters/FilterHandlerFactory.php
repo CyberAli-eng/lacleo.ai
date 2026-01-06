@@ -12,6 +12,11 @@ class FilterHandlerFactory
     {
         // Use 'type' from registry
         $type = $filter->type ?? null;
+        $source = $filter->value_source ?? null;
+
+        if ($source === 'elasticsearch') {
+            return new \App\Filters\Handlers\ElasticsearchFilterHandler($filter, $manager);
+        }
 
         $mode = $filter->settings['filtering']['mode'] ?? null;
         if ($mode === 'exists') {

@@ -35,7 +35,7 @@ class ContactsReindex extends Command
             foreach ($hits as $hit) {
                 $id = $hit['_id'] ?? null;
                 $src = $hit['_source'] ?? [];
-                if (! $id) {
+                if (!$id) {
                     continue;
                 }
 
@@ -90,7 +90,7 @@ class ContactsReindex extends Command
                 ]);
             }
 
-            $this->info('Processed page '.$page.' ('.count($hits).' docs)');
+            $this->info('Processed page ' . $page . ' (' . count($hits) . ' docs)');
             $page++;
         }
 
