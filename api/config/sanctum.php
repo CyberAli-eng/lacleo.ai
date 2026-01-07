@@ -17,7 +17,7 @@ return [
 
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
         '%s%s',
-        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1,app.lacleo.test,app.lacleo.test:3000,local-api.lacleo.test',
+        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1,app.lacleo.test,app.lacleo.test:3000,local-api.lacleo.test,lacleo-ai.vercel.app',
         Sanctum::currentApplicationUrlWithPort()
     ))),
 
