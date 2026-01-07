@@ -11,7 +11,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(\App\Elasticsearch\ElasticClient::class, function () {
+            return new \App\Elasticsearch\ElasticClient();
+        });
     }
 
     /**

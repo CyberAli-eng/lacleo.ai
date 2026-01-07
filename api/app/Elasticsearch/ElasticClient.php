@@ -26,6 +26,18 @@ class ElasticClient
     public function __construct()
     {
         $this->config = config('elasticsearch');
+    }
+
+    protected function ensureInitialized(): void
+    {
+        if (isset($this->client)) {
+            return;
+        }
+
+        // 🔒 ABSOLUTE BUILD SAFETY
+        if (function_exists('app') && app()->runningInConsole()) {
+            return;
+        }
 
         $this->validateConfig();
         $this->initializeClient();
@@ -38,7 +50,7 @@ class ElasticClient
 
     protected function validateConfig(): void
     {
-        if (empty($this->config['hosts']) || ! is_array($this->config['hosts'])) {
+        if (empty($this->config['hosts']) || !is_array($this->config['hosts'])) {
             throw new InvalidArgumentException(
                 'Elasticsearch hosts configuration is missing or invalid'
             );
@@ -64,8 +76,9 @@ class ElasticClient
         }
 
         // Authentication
-        if (! empty($this->config['auth']['api_key'])
-            && ! empty($this->config['auth']['api_key_secret'])
+        if (
+            !empty($this->config['auth']['api_key'])
+            && !empty($this->config['auth']['api_key_secret'])
         ) {
             $builder->setApiKey(
                 base64_encode(
@@ -74,16 +87,16 @@ class ElasticClient
                     . $this->config['auth']['api_key_secret']
                 )
             );
-        } elseif (! empty($this->config['auth']['api_key'])) {
+        } elseif (!empty($this->config['auth']['api_key'])) {
             $builder->setApiKey($this->config['auth']['api_key']);
-        } elseif (! empty($this->config['auth']['username'])) {
+        } elseif (!empty($this->config['auth']['username'])) {
             $builder->setBasicAuthentication(
                 $this->config['auth']['username'],
                 $this->config['auth']['password'] ?? ''
             );
         }
 
-        if (! empty($this->config['retries'])) {
+        if (!empty($this->config['retries'])) {
             $builder->setRetries((int) $this->config['retries']);
         }
 
@@ -105,7 +118,7 @@ class ElasticClient
                     ->exists($this->withHeaders(['index' => $index]))
                     ->asBool();
 
-                if (! $exists) {
+                if (!$exists) {
                     Log::channel('elastic')->critical(
                         'Required Elasticsearch index missing',
                         ['index' => $index]
@@ -147,6 +160,7 @@ class ElasticClient
         ?string $id = null,
         array $options = []
     ): array {
+        $this->ensureInitialized();
         $this->assertIndexExists($index);
 
         try {
@@ -181,6 +195,7 @@ class ElasticClient
         string $id,
         array $options = []
     ): array {
+        $this->ensureInitialized();
         $this->assertIndexExists($index);
 
         return $this->client->get(
@@ -193,9 +208,10 @@ class ElasticClient
 
     public function search(array $params): array
     {
+        $this->ensureInitialized();
         $index = $params['index'] ?? null;
 
-        if (! is_string($index)) {
+        if (!is_string($index)) {
             throw new InvalidArgumentException('Search requires explicit index');
         }
 
@@ -239,7 +255,10 @@ class ElasticClient
 
     public function ping(): bool
     {
+        $this->ensureInitialized();
         try {
+            if (!isset($this->client))
+                return false;
             $this->client->info($this->withHeaders([]))->asArray();
             return true;
         } catch (Exception $e) {
@@ -257,12 +276,16 @@ class ElasticClient
 
     protected function assertIndexExists(string $index): void
     {
+        $this->ensureInitialized();
+        if (!isset($this->client))
+            return;
+
         $exists = $this->client
             ->indices()
             ->exists($this->withHeaders(['index' => $index]))
             ->asBool();
 
-        if (! $exists) {
+        if (!$exists) {
             throw new InvalidArgumentException(
                 "Elasticsearch index does not exist: {$index}"
             );
@@ -287,6 +310,7 @@ class ElasticClient
 
     public function getClient(): Client
     {
+        $this->ensureInitialized();
         return $this->client;
     }
 }
