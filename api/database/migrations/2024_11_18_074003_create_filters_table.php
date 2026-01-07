@@ -5,8 +5,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     /**
      * Run the migrations.
      */
@@ -50,7 +49,7 @@ return new class extends Migration
             // Points to the class that handles this filter's logic
             $table->string('handler_class')->nullable();
             // Additional settings for range configuration, validation options
-            $table->json('settings')->nullable()->comment('Range configuration, validation options');
+            $table->longText('settings')->nullable()->comment('Range configuration, validation options');
             $table->unsignedInteger('sort_order');
             $table->boolean('is_active')->default(true);
             $table->timestamps();
