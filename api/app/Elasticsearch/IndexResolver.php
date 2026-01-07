@@ -26,12 +26,14 @@ class IndexResolver
 
     protected static function requireEnv(string $key): string
     {
+        // 🔒 ABSOLUTE BUILD SAFETY
+        // Returning empty string instead of throwing during build-time (package:discover)
+        if (function_exists('app') && app()->runningInConsole()) {
+            return (string) env($key, '');
+        }
+
         $val = env($key);
         if (!is_string($val) || $val === '') {
-            // Allow missing env vars during CLI/Build phase to prevent crashing Docker build
-            if (function_exists('app') && app()->runningInConsole() && !app()->isProduction()) {
-                return (string) $val;
-            }
             throw new \InvalidArgumentException("Missing required env: {$key}");
         }
         return $val;
