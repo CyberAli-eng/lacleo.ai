@@ -28,7 +28,11 @@ class IndexResolver
     {
         $val = env($key);
         if (!is_string($val) || $val === '') {
-            throw new InvalidArgumentException("Missing required env: {$key}");
+            // Allow missing env vars during CLI/Build phase to prevent crashing Docker build
+            if (function_exists('app') && app()->runningInConsole() && !app()->isProduction()) {
+                return (string) $val;
+            }
+            throw new \InvalidArgumentException("Missing required env: {$key}");
         }
         return $val;
     }
