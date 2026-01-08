@@ -6,6 +6,7 @@ use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController as BaseContr
 use Laravel\Fortify\Contracts\LoginResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Inertia\Inertia;
 
 class AuthenticatedSessionController extends BaseController
 {
@@ -23,7 +24,7 @@ class AuthenticatedSessionController extends BaseController
 
         $frontendUrl = env('WEB_APP_URL', 'https://lacleo-ai.vercel.app');
 
-        // Redirect to frontend with token
-        return redirect()->away($frontendUrl . '?token=' . $token);
+        // Redirect using Inertia location to avoid CORS/XHR issues
+        return Inertia::location($frontendUrl . '?token=' . $token);
     }
 }

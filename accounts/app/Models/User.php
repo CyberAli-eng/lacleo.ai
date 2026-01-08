@@ -69,4 +69,11 @@ class User extends Authenticatable
             'preferences' => 'array',
         ];
     }
+    /**
+     * Get the workspaces owned by the user.
+     */
+    public function workspaces()
+    {
+        return $this->hasMany(\App\Models\Workspace::class, 'owner_user_id');
+    }
 }

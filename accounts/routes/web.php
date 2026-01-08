@@ -16,25 +16,27 @@ function getAppRedirectUrl($user)
         return route('login');
     $token = $user->createToken('web-app', ['*'], now()->addDays(30))->plainTextToken;
     $frontendUrl = env('WEB_APP_URL', 'https://lacleo-ai.vercel.app');
-    return $frontendUrl . '?token=' . $token;
+
+    // Use Inertia location for external redirects to bypass CORS
+    return Inertia::location($frontendUrl . '?token=' . $token);
 }
 
 // Redirect root to SSO flow
 Route::get('/', function () {
     if (Auth::check()) {
-        return redirect()->away(getAppRedirectUrl(Auth::user()));
+        return getAppRedirectUrl(Auth::user());
     }
     return redirect()->route('login');
 });
 
 // SSO Verification Route (Protected by Session)
 Route::middleware(['auth:web'])->get('/sso/verify', function () {
-    return redirect()->away(getAppRedirectUrl(Auth::user()));
+    return getAppRedirectUrl(Auth::user());
 });
 
 // Dashboard should mostly redirect to app now
 Route::middleware(['auth:web'])->get('/dashboard', function () {
-    return redirect()->away(getAppRedirectUrl(Auth::user()));
+    return getAppRedirectUrl(Auth::user());
 })->name('dashboard');
 
 // JSON current-user endpoint for SPA (Token Only)
