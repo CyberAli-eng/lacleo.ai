@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
           secure: false
         },
         "/api": {
-          target: env.VITE_API_HOST || "https://local-api.lacleo.test",
+          target: env.VITE_API_HOST ? new URL(env.VITE_API_HOST).origin : "https://local-api.lacleo.test",
           changeOrigin: true,
           secure: false
         }

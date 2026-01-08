@@ -24,7 +24,7 @@ import {
   selectSelectedItems,
   selectCompanyFilters,
   selectContactFilters,
-  selectActiveFilters, // Main active state
+  selectActiveFilters,
   sectionToKey,
   setSearchTerm,
   toggleSection,
