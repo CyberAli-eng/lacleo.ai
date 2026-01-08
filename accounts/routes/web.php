@@ -51,3 +51,22 @@ Route::middleware(['auth:sanctum'])->get('/user', function () {
         'profile_photo_url' => property_exists($user, 'profile_photo_url') ? $user->profile_photo_url : null,
     ]);
 });
+
+// Diagnostic Route to check DB connection
+Route::get('/test-db', function () {
+    try {
+        $dbName = \DB::connection()->getDatabaseName();
+        $userCount = \App\Models\User::count();
+        $tokenCount = \DB::table('personal_access_tokens')->count();
+        return response()->json([
+            'status' => 'ok',
+            'database' => $dbName,
+            'users' => $userCount,
+            'tokens' => $tokenCount,
+            'env_db' => env('DB_DATABASE'),
+            'env_host' => env('DB_HOST'),
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
