@@ -22,9 +22,8 @@ RUN composer install --no-dev --optimize-autoloader
 # Install Node deps and build assets
 RUN npm install && npm run build
 
+RUN chmod +x startup.sh
+
 EXPOSE 8080
 
-CMD php artisan migrate --force || true && \
-    php artisan config:clear && \
-    php artisan route:clear && \
-    php artisan serve --host=0.0.0.0 --port=8080
+CMD ["./startup.sh"]
