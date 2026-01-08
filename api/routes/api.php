@@ -24,6 +24,7 @@ Route::prefix('v1')->middleware([\App\Http\Middleware\RequestLogMiddleware::clas
     Route::get('/health', function () {
         return response()->json(['status' => 'ok', 'timestamp' => now()->toIso8601String()]);
     });
+    Route::get('/diag', [\App\Http\Controllers\Api\v1\DiagnosticController::class, 'diag']);
     Route::get('/filters', [SearchController::class, 'getFilters']);
     Route::get('/filter/values', [SearchController::class, 'getFilterValues']);
     Route::get('/search/{type}', [SearchController::class, 'search'])->middleware(app()->environment(['testing', 'local']) ? [] : 'throttle:search');
