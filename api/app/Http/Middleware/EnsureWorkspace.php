@@ -12,6 +12,8 @@ class EnsureWorkspace
     public function handle(Request $request, Closure $next)
     {
         $user = $request->user();
+
+        // Only attempt to ensure workspace if we have a user
         if ($user) {
             Workspace::firstOrCreate(
                 ['owner_user_id' => $user->id],
