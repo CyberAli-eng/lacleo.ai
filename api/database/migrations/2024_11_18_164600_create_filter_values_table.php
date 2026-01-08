@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Filter;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -11,17 +10,19 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        Schema::create('filter_values', function (Blueprint $table) {
-            $table->id();
-            $table->foreignIdFor(Filter::class);
-            $table->string('value_id')->unique();
-            $table->string('display_value');
-            $table->longText('metadata')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamps();
+        if (!Schema::hasTable('filter_values')) {
+            Schema::create('filter_values', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('filter_id');
+                $table->string('value_id')->unique();
+                $table->string('display_value');
+                $table->longText('metadata')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
 
-            $table->index(['filter_id', 'value_id']);
-        });
+                $table->index(['filter_id', 'value_id']);
+            });
+        }
     }
 
     /**

@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\EnrichmentRequest;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -11,15 +10,16 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        Schema::create('enrichment_results', function (Blueprint $table) {
-            $table->id();
-            $table->foreignIdFor(EnrichmentRequest::class);
-            $table->string('reference_id')->nullable();
-            $table->longText('raw_response')->nullable();
-            $table->timestamps();
-
-            $table->index('enrichment_request_id');
-        });
+        if (!Schema::hasTable('enrichment_results')) {
+            Schema::create('enrichment_results', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('enrichment_request_id');
+                $table->string('external_id')->index();
+                $table->enum('entity_type', ['contact', 'company']);
+                $table->longText('data');
+                $table->timestamps();
+            });
+        }
     }
 
     /**
