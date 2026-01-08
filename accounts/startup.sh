@@ -2,7 +2,7 @@
 
 # 1. Run Migrations
 echo "Running migrations..."
-php artisan migrate --force
+php artisan migrate --force || echo "Migration failed, but continuing..."
 
 # 2. Clear Cache
 php artisan config:clear

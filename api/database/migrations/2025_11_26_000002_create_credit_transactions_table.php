@@ -7,17 +7,19 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('credit_transactions', function (Blueprint $table) {
-            $table->string('id')->primary();
-            $table->string('workspace_id');
-            $table->integer('amount');
-            $table->string('type');
-            $table->string('reference_id')->nullable();
-            $table->longText('meta')->nullable();
-            $table->timestamps();
+        if (!Schema::hasTable('credit_transactions')) {
+            Schema::create('credit_transactions', function (Blueprint $table) {
+                $table->string('id')->primary();
+                $table->string('workspace_id');
+                $table->integer('amount');
+                $table->string('type');
+                $table->string('reference_id')->nullable();
+                $table->longText('meta')->nullable();
+                $table->timestamps();
 
-            $table->index(['workspace_id', 'created_at']);
-        });
+                $table->index(['workspace_id', 'created_at']);
+            });
+        }
     }
 
     public function down(): void
