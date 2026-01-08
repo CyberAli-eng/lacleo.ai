@@ -9,21 +9,35 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 // Custom login endpoint that returns token
 Route::post('/login', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
 
+// Helper to get frontend token URL
+function getAppRedirectUrl($user)
+{
+    if (!$user)
+        return route('login');
+    $token = $user->createToken('web-app', ['*'], now()->addDays(30))->plainTextToken;
+    $frontendUrl = env('WEB_APP_URL', 'https://lacleo-ai.vercel.app');
+    return $frontendUrl . '?token=' . $token;
+}
+
+// Redirect root to SSO flow
 Route::get('/', function () {
+    if (Auth::check()) {
+        return redirect()->away(getAppRedirectUrl(Auth::user()));
+    }
     return redirect()->route('login');
 });
 
-Route::middleware([
-    'auth:sanctum',
-    config('jetstream.auth_session'),
-    'verified',
-])->group(function () {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->name('dashboard');
+// SSO Verification Route (Protected by Session)
+Route::middleware(['auth:web'])->get('/sso/verify', function () {
+    return redirect()->away(getAppRedirectUrl(Auth::user()));
 });
 
-// JSON current-user endpoint for SPA
+// Dashboard should mostly redirect to app now
+Route::middleware(['auth:web'])->get('/dashboard', function () {
+    return redirect()->away(getAppRedirectUrl(Auth::user()));
+})->name('dashboard');
+
+// JSON current-user endpoint for SPA (Token Only)
 Route::middleware(['auth:sanctum'])->get('/user', function () {
     $user = Auth::user();
     if (!$user) {
