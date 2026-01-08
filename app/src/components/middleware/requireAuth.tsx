@@ -18,10 +18,10 @@ const RequireAuth = () => {
   const [isInitialized, setIsInitialized] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(true)
   const [triggerApi, { isError, currentData, isFetching }] = useLazyGetUserQuery()
-  const [redirected, setRedirected] = useState(false)
   const [stalled, setStalled] = useState(false)
   const [hasRequested, setHasRequested] = useState(false)
   const [alreadyRedirected, setAlreadyRedirected] = useState(false)
+  const [redirected, setRedirected] = useState(false)
 
   const redirectToLogin = () => {
     const target = typeof ACCOUNT_HOST === "string" && ACCOUNT_HOST ? ACCOUNT_HOST : "/account"
@@ -29,9 +29,10 @@ const RequireAuth = () => {
   }
 
   useEffect(() => {
-    const flag = typeof window !== "undefined" ? sessionStorage.getItem("authRedirectInProgress") : null
-    if (!isFetching && isError && !redirected && flag !== "1") {
-      showAlert("Session Expired", "Please sign in again to continue.", "warning")
+    // If API fails (401 or 500), immediately redirect to login to refresh token/session
+    if (!isFetching && isError) {
+      console.error("Authentication failed. Redirecting to login...")
+      dispatch(clearUserSession()) // Clear invalid token state
       const target = typeof ACCOUNT_HOST === "string" && ACCOUNT_HOST ? ACCOUNT_HOST : "/account"
       setRedirected(true)
       try {
@@ -42,7 +43,7 @@ const RequireAuth = () => {
       const t = setTimeout(() => window.location.assign(target), 1200)
       return () => clearTimeout(t)
     }
-  }, [showAlert, isFetching, isError, redirected])
+  }, [isFetching, isError, dispatch])
 
   useEffect(() => {
     try {
@@ -99,16 +100,12 @@ const RequireAuth = () => {
 
   if (isError) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <motion.div layout variants={ANIMATION_VARIANTS.alert} initial="initial" animate="animate" exit="exit">
-          <Alert variant="info" className="relative flex min-w-96 items-center overflow-hidden shadow-lg dark:shadow-lg">
-            <LoadingSpinner size="default" className="mr-3 text-blue-800 dark:text-blue-300" />
-            <div>
-              <AlertTitle className="mb-1 text-base font-semibold">Preparing Your Secure Login</AlertTitle>
-              <AlertDescription className="text-sm text-muted-foreground">Redirecting to the login page...</AlertDescription>
-            </div>
-          </Alert>
-        </motion.div>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
+        <LoadingSpinner size="lg" className="text-primary" />
+        <div className="text-center">
+          <p className="mb-1 text-lg font-medium">Authentication Failed</p>
+          <p className="text-sm text-muted-foreground">Redirecting to login...</p>
+        </div>
       </div>
     )
   }
