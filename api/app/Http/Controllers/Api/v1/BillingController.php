@@ -46,10 +46,10 @@ class BillingController extends Controller
             $used = $transactions->where('amount', '<', 0)->sum(fn($t) => abs($t->amount));
 
             $revealEmail = $transactions
-                ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_email'))
+                ->filter(fn($t) => $t->type === 'spend' && is_array($t->meta) && (($t->meta['category'] ?? null) === 'reveal_email'))
                 ->sum(fn($t) => abs($t->amount));
             $revealPhone = $transactions
-                ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'reveal_phone'))
+                ->filter(fn($t) => $t->type === 'spend' && is_array($t->meta) && (($t->meta['category'] ?? null) === 'reveal_phone'))
                 ->sum(fn($t) => abs($t->amount));
         } catch (\Throwable $e) {
             return response()->json([
@@ -72,10 +72,10 @@ class BillingController extends Controller
 
         // Exports are recorded with meta email_count and phone_count; compute per-category credits
         $exportEmailCredits = $transactions
-            ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
+            ->filter(fn($t) => $t->type === 'spend' && is_array($t->meta) && (($t->meta['category'] ?? null) === 'export'))
             ->sum(fn($t) => (int) (($t->meta['email_count'] ?? 0) * 1));
         $exportPhoneCredits = $transactions
-            ->filter(fn($t) => $t->type === 'spend' && (($t->meta['category'] ?? null) === 'export'))
+            ->filter(fn($t) => $t->type === 'spend' && is_array($t->meta) && (($t->meta['category'] ?? null) === 'export'))
             ->sum(fn($t) => (int) (($t->meta['phone_count'] ?? 0) * 4));
 
         $adjustmentsDebited = $transactions
