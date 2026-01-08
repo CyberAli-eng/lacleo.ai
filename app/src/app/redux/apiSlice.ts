@@ -20,7 +20,11 @@ const baseQuery = fetchBaseQuery({
 export const accountBaseQuery = fetchBaseQuery({
   baseUrl: ACCOUNT_HOST as string,
   credentials: "include",
-  prepareHeaders: (headers) => {
+  prepareHeaders: (headers, { getState }) => {
+    const state = getState() as TRootState
+    const token = state.setting.token
+    if (token) headers.set("authorization", `Bearer ${token}`)
+
     const xsrfToken = Cookies.get("XSRF-TOKEN")
     if (xsrfToken) {
       headers.set("X-XSRF-TOKEN", xsrfToken)
