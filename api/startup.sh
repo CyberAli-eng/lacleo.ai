@@ -8,6 +8,10 @@ php artisan migrate --force || echo "Migration failed, but continuing..."
 echo "Seeding admin user if needed..."
 php artisan db:seed --class=EnsureAdminUserSeeder --force || echo "Seeding failed, but continuing..."
 
+# 3. Seed Workspaces
+echo "Creating workspaces for users..."
+php artisan db:seed --class=EnsureWorkspaceSeeder --force || echo "Workspace seeding failed, but continuing..."
+
 # 3. Clear Cache
 php artisan config:clear
 php artisan route:clear

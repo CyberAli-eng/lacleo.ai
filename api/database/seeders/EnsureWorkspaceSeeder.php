@@ -12,7 +12,7 @@ class EnsureWorkspaceSeeder extends Seeder
     public function run()
     {
         // Get all users without workspaces
-        $usersWithoutWorkspaces = User::whereDoesntHave('workspace')->get();
+        $usersWithoutWorkspaces = User::whereDoesntHave('workspaces')->get();
 
         foreach ($usersWithoutWorkspaces as $user) {
             Workspace::create([

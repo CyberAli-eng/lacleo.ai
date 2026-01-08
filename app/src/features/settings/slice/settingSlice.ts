@@ -2,12 +2,33 @@ import { GET_USER_THEME, SET_USER_THEME } from "@/app/utils/localStorage"
 import { TRootState } from "@/interface/reduxRoot/state"
 import { ISettingSliceState, IUser, TThemeMode } from "@/interface/settings/slice"
 import { createSlice, PayloadAction } from "@reduxjs/toolkit"
-import Cookies from "js-cookie"
 
-const TOKEN_KEY = import.meta.env.VITE_ACCOUNT_COOKIE_TOKEN_KEY || "LocalAccessToken"
+const TOKEN_KEY = "auth_token"
+
+// Get token from localStorage
+const getStoredToken = (): string | undefined => {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Store token in localStorage
+const storeToken = (token: string | undefined) => {
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token)
+    } else {
+      localStorage.removeItem(TOKEN_KEY)
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 const initialState: ISettingSliceState = {
-  token: Cookies.get(TOKEN_KEY),
+  token: getStoredToken(),
   user: undefined,
   theme: GET_USER_THEME()
 }
@@ -22,6 +43,7 @@ const settingSlice = createSlice({
 
     setToken: (state, action: PayloadAction<string | undefined>) => {
       state.token = action.payload
+      storeToken(action.payload)
     },
 
     setTheme: (state, action: PayloadAction<TThemeMode>) => {
@@ -32,6 +54,7 @@ const settingSlice = createSlice({
     clearUserSession: (state) => {
       state.token = undefined
       state.user = undefined
+      storeToken(undefined)
     },
 
     setCreditUsageOpen: (state, action: PayloadAction<boolean>) => {

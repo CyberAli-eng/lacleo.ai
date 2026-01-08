@@ -4,6 +4,10 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
+
+// Custom login endpoint that returns token
+Route::post('/login', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
 
 Route::get('/', function () {
     return redirect()->route('login');
@@ -22,7 +26,7 @@ Route::middleware([
 // JSON current-user endpoint for SPA
 Route::middleware(['auth:sanctum'])->get('/user', function () {
     $user = Auth::user();
-    if (! $user) {
+    if (!$user) {
         return response()->json(['error' => 'UNAUTHENTICATED'], 401);
     }
     return response()->json([

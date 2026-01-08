@@ -2,7 +2,7 @@ import { ACCOUNT_HOST } from "@/app/constants/apiConstants"
 import { useAlert } from "@/app/hooks/alertHooks"
 import { useAppDispatch, useAppSelector } from "@/app/hooks/reduxHooks"
 import { useLazyGetUserQuery } from "@/features/settings/slice/apiSlice"
-import { selectToken, setUser, clearUserSession } from "@/features/settings/slice/settingSlice"
+import { selectToken, setUser, clearUserSession, setToken } from "@/features/settings/slice/settingSlice"
 import { motion } from "framer-motion"
 import { useEffect, useState } from "react"
 import { Outlet } from "react-router-dom"
@@ -52,6 +52,26 @@ const RequireAuth = () => {
       void 0
     }
   }, [])
+
+  // Check for token in URL query params (for post-login flow)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      const urlToken = params.get("token")
+
+      if (urlToken) {
+        // Store token and clean URL
+        dispatch(setToken(urlToken))
+
+        // Remove token from URL without refreshing
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname
+        window.history.replaceState({ path: newUrl }, "", newUrl)
+
+        // Trigger immediate user fetch
+        setHasRequested(false)
+      }
+    }
+  }, [dispatch])
 
   useEffect(() => {
     if (!isFetching && currentData) {

@@ -25,7 +25,7 @@ class User extends Authenticatable
         parent::boot();
 
         static::creating(function ($model) {
-            if (! $model->id) {
+            if (!$model->id) {
                 $model->id = (string) strtolower(Str::ulid());
             }
         });
@@ -89,7 +89,7 @@ class User extends Authenticatable
      */
     public function getHasPasswordAttribute()
     {
-        return ! is_null($this->password);
+        return !is_null($this->password);
     }
 
     /**
@@ -99,7 +99,7 @@ class User extends Authenticatable
      */
     public function hasVerifiedEmail()
     {
-        return ! is_null($this->email_verified_at);
+        return !is_null($this->email_verified_at);
     }
 
     /**
@@ -109,7 +109,7 @@ class User extends Authenticatable
      */
     public function getEmailVerifiedAttribute()
     {
-        return ! is_null($this->email_verified_at);
+        return !is_null($this->email_verified_at);
     }
 
     /**
@@ -119,7 +119,7 @@ class User extends Authenticatable
     {
         return Attribute::get(function () {
             return $this->profile_photo_path
-                ? config('app.url_accounts').'/storage/'.$this->profile_photo_path
+                ? config('app.url_accounts') . '/storage/' . $this->profile_photo_path
                 : $this->defaultProfilePhotoUrl();
         });
     }
@@ -135,7 +135,7 @@ class User extends Authenticatable
             return mb_substr($segment, 0, 1);
         })->join(' '));
 
-        return 'https://ui-avatars.com/api/?name='.urlencode($name).'&color=7F9CF5&background=EBF4FF';
+        return 'https://ui-avatars.com/api/?name=' . urlencode($name) . '&color=7F9CF5&background=EBF4FF';
     }
 
     /**
@@ -178,14 +178,22 @@ class User extends Authenticatable
      */
     public function attachToTeam(Team $team, string $role = 'member'): void
     {
-        if (! $this->belongsToTeam($team)) {
+        if (!$this->belongsToTeam($team)) {
             $this->teams()->attach($team, ['role' => $role]);
 
-            if (! $this->current_team_id) {
+            if (!$this->current_team_id) {
                 $this->forceFill([
                     'current_team_id' => $team->id,
                 ])->save();
             }
         }
+    }
+
+    /**
+     * Get the workspaces owned by the user.
+     */
+    public function workspaces()
+    {
+        return $this->hasMany(\App\Models\Workspace::class, 'owner_user_id');
     }
 }
