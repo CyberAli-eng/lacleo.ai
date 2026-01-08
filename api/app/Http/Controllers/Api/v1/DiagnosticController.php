@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Auth;
 
 class DiagnosticController
 {
-    public function index(Request $request)
+    public function diag(Request $request)
     {
         $data = [
             'database' => [
